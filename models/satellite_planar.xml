@@ -1,0 +1,151 @@
+<mujoco model="satellite_planar">
+  <compiler angle="degree" coordinate="local" inertiafromgeom="false"/>
+
+  <!-- Match legacy timing: Euler at 0.02s -->
+  <option integrator="Euler" timestep="0.02" gravity="0 0 0"/>
+
+  <asset>
+    <material name="mat_workspace" rgba="0.05 0.05 0.05 1" specular="0" emission="0" shininess="0" reflectance="0"/>
+    <material name="mat_thruster_active" rgba="1 0.2 0.2 1" emission="1"/> 
+    <material name="mat_thruster_inactive" rgba="0.5 0.5 0.5 0.3"/>
+    
+    <!-- Grid -->
+    <texture name="grid_tex" type="2d" builtin="checker" width="512" height="512" rgb1=".1 .2 .3" rgb2=".2 .3 .4" mark="edge" markrgb=".8 .8 .8"/>
+    <material name="grid_mat" texture="grid_tex" texrepeat="6 6" texuniform="true" reflectance=".2"/>
+
+    <!-- White Background -->
+    <texture name="tex_sky" type="skybox" builtin="gradient" width="512" height="512" rgb1="1 1 1" rgb2="0.9 0.9 0.9"/>
+  </asset>
+
+  <visual>
+    <map fogstart="5" fogend="10" haze="0" znear="0.01" zfar="50"/>
+    <headlight ambient="0.4 0.4 0.4" diffuse="0.4 0.4 0.4" specular="0.1 0.1 0.1"/>
+    <rgba haze="0.1 0.1 0.1 1"/>
+    <global offwidth="1920" offheight="1080"/> 
+  </visual>
+
+  <default>
+    <joint armature="0" damping="0.0" limited="false"/>
+    <!-- Geoms frictionless by default; collisions enabled when contype/conaffinity set on individual geoms -->
+    <!-- Changed default to neutral gray to avoid "Golden" accidents -->
+    <geom conaffinity="0" contype="0" condim="3" friction="0 0 0" rgba="0.5 0.5 0.5 1"/>
+  </default>
+
+  <worldbody>
+    <!-- Simple Overhead Lighting - High Ambient for Softness -->
+    <light ambient="0.7 0.7 0.7" diffuse="0.1 0.1 0.1" specular="0 0 0" pos="0 0 4" dir="0 0 -1" castshadow="false"/>
+
+    <!-- Fixed Camera for MP4 Rendering -->
+    <!-- Positioned at (6, -6, 8), looking at center (0,0,0) manually defined via xyaxes -->
+    <camera name="overhead_cam" pos="6 -6 8" mode="fixed" xyaxes="0.707 0.707 0 -0.485 0.485 0.727"/>
+
+    <!-- Ground plane for air bearing table (6m x 6m) -->
+    <!-- Explicit RGBA to override default and ensure Dark Gray -->
+    <geom name="floor" type="plane" size="3 3 0.1" material="grid_mat" rgba="1 1 1 1" contype="0" conaffinity="0" friction="0 0 0"/>
+
+    <!-- 3x3m workspace edges (10cm high), bouncy walls -->
+    <geom name="wall_north" type="box" pos="0 3 0.05" size="3 0.05 0.05" material="mat_workspace" rgba="0.2 0.2 0.2 1"
+          contype="1" conaffinity="1" friction="0 0 0" solref="0.002 1" solimp="0.9 0.95 0.001"/>
+    <geom name="wall_south" type="box" pos="0 -3 0.05" size="3 0.05 0.05" material="mat_workspace" rgba="0.2 0.2 0.2 1"
+          contype="1" conaffinity="1" friction="0 0 0" solref="0.002 1" solimp="0.9 0.95 0.001"/>
+    <geom name="wall_east" type="box" pos="3 0 0.05" size="0.05 3 0.05" material="mat_workspace" rgba="0.2 0.2 0.2 1"
+          contype="1" conaffinity="1" friction="0 0 0" solref="0.002 1" solimp="0.9 0.95 0.001"/>
+    <geom name="wall_west" type="box" pos="-3 0 0.05" size="0.05 3 0.05" material="mat_workspace" rgba="0.2 0.2 0.2 1"
+          contype="1" conaffinity="1" friction="0 0 0" solref="0.002 1" solimp="0.9 0.95 0.001"/>
+
+    <!-- Satellite body -->
+    <body name="satellite" pos="0 0 0.145">
+      <!-- Planar joints (2D motion: x, y, rotation about z) -->
+      <joint name="x" type="slide" axis="1 0 0" pos="0 0 0" damping="0"/>
+      <joint name="y" type="slide" axis="0 1 0" pos="0 0 0" damping="0"/>
+      <joint name="z_rot" type="hinge" axis="0 0 1" pos="0 0 0" damping="0"/>
+
+      <!-- Main body (290mm cube, 23.09 kg total) -->
+      <geom name="body" type="box" size="0.145 0.145 0.145"
+            mass="23.09"
+            pos="0 0 0"
+            rgba="0.2 0.3 0.8 1"
+            contype="1" conaffinity="1" friction="0 0 0"
+            solref="0.002 1" solimp="0.9 0.95 0.001"/>
+
+      <!-- Visual-only box at thruster height (~0.195m) for reference -->
+      <geom name="sat_visual_box" type="box" size="0.145 0.145 0.01"
+            pos="0 0 0.195" rgba="0.2 0.4 0.8 1"
+            contype="0" conaffinity="0" friction="0 0 0"/>
+
+      <!-- Override inertia with exact value (planar yaw inertia ~0.324 kg*m^2) -->
+      <inertial pos="0 0 0" mass="23.09"
+                diaginertia="0.324 0.324 0.324"/>
+
+      <!-- Thruster visual markers and force application sites -->
+
+      <!-- Thruster 1: (0.145, 0.06), direction (-1, 0) -->
+      <site name="thruster1" pos="0.145 0.06 0" size="0.02" rgba="1 0 0 0.6"/>
+
+      <!-- Thruster 2: (0.145, -0.06), direction (-1, 0) -->
+      <site name="thruster2" pos="0.145 -0.06 0" size="0.02" rgba="1 0.2 0 0.6"/>
+
+      <!-- Thruster 3: (0.06, -0.145), direction (0, 1) -->
+      <site name="thruster3" pos="0.06 -0.145 0" size="0.02" rgba="0 1 0 0.6"/>
+
+      <!-- Thruster 4: (-0.06, -0.145), direction (0, 1) -->
+      <site name="thruster4" pos="-0.06 -0.145 0" size="0.02" rgba="0.2 1 0 0.6"/>
+
+      <!-- Thruster 5: (-0.145, -0.06), direction (1, 0) -->
+      <site name="thruster5" pos="-0.145 -0.06 0" size="0.02" rgba="0 0 1 0.6"/>
+
+      <!-- Thruster 6: (-0.145, 0.06), direction (1, 0) -->
+      <site name="thruster6" pos="-0.145 0.06 0" size="0.02" rgba="0 0.2 1 0.6"/>
+
+      <!-- Thruster 7: (-0.06, 0.145), direction (0, -1) -->
+      <site name="thruster7" pos="-0.06 0.145 0" size="0.02" rgba="1 1 0 0.6"/>
+
+      <!-- Thruster 8: (0.06, 0.145), direction (0, -1) -->
+      <site name="thruster8" pos="0.06 0.145 0" size="0.02" rgba="1 0.8 0 0.6"/>
+
+      <!-- Track camera follows satellite -->
+      <camera name="track" mode="trackcom" pos="0 -4 3" xyaxes="1 0 0 0 0.6 1"/>
+    </body>
+  </worldbody>
+
+  <actuator>
+    <!-- Direct force actuators using adhesion actuators
+         These apply forces at sites in world coordinates -->
+
+    <!-- Thruster 1: 0.441 N in direction (-1, 0, 0) -->
+    <adhesion name="thruster1_x" body="satellite" ctrlrange="0 0.441450"/>
+
+    <!-- Thruster 2: 0.431 N in direction (-1, 0, 0) -->
+    <adhesion name="thruster2_x" body="satellite" ctrlrange="0 0.430659"/>
+
+    <!-- Thruster 3: 0.428 N in direction (0, 1, 0) -->
+    <adhesion name="thruster3_y" body="satellite" ctrlrange="0 0.427716"/>
+
+    <!-- Thruster 4: 0.438 N in direction (0, 1, 0) -->
+    <adhesion name="thruster4_y" body="satellite" ctrlrange="0 0.438017"/>
+
+    <!-- Thruster 5: 0.469 N in direction (1, 0, 0) -->
+    <adhesion name="thruster5_x" body="satellite" ctrlrange="0 0.468918"/>
+
+    <!-- Thruster 6: 0.447 N in direction (1, 0, 0) -->
+    <adhesion name="thruster6_x" body="satellite" ctrlrange="0 0.446846"/>
+
+    <!-- Thruster 7: 0.467 N in direction (0, -1, 0) -->
+    <adhesion name="thruster7_y" body="satellite" ctrlrange="0 0.466956"/>
+
+    <!-- Thruster 8: 0.484 N in direction (0, -1, 0) -->
+    <adhesion name="thruster8_y" body="satellite" ctrlrange="0 0.484124"/>
+  </actuator>
+
+  <sensor>
+    <!-- Position sensors -->
+    <jointpos name="x_pos" joint="x"/>
+    <jointpos name="y_pos" joint="y"/>
+    <jointpos name="z_rot_pos" joint="z_rot"/>
+
+    <!-- Velocity sensors -->
+    <jointvel name="x_vel" joint="x"/>
+    <jointvel name="y_vel" joint="y"/>
+    <jointvel name="z_rot_vel" joint="z_rot"/>
+  </sensor>
+</mujoco>
