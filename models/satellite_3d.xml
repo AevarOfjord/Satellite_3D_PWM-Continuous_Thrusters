@@ -1,0 +1,114 @@
+<?xml version="1.0" encoding="utf-8"?>
+<mujoco model="satellite_3d">
+  <compiler angle="degree" coordinate="local" inertiafromgeom="false"/>
+
+  <!-- RK4 integration at 5ms for better accuracy -->
+  <option integrator="RK4" timestep="0.005" gravity="0 0 0"/>
+
+  <asset>
+    <material name="mat_body" rgba="0.2 0.3 0.8 1"/>
+    <material name="mat_thruster_active" rgba="1 0.2 0.2 1" emission="1"/>
+    <material name="mat_thruster_inactive" rgba="0.5 0.5 0.5 0.3"/>
+    
+    <!-- Grid texture for workspace floor -->
+    <texture name="grid_tex" type="2d" builtin="checker" width="512" height="512" 
+             rgb1=".1 .2 .3" rgb2=".2 .3 .4" mark="edge" markrgb=".8 .8 .8"/>
+    <material name="grid_mat" texture="grid_tex" texrepeat="6 6" texuniform="true" reflectance=".2"/>
+
+    <!-- Skybox -->
+    <texture name="tex_sky" type="skybox" builtin="gradient" width="512" height="512" 
+             rgb1="0.1 0.1 0.2" rgb2="0.3 0.3 0.4"/>
+  </asset>
+
+  <visual>
+    <map fogstart="10" fogend="20" haze="0" znear="0.01" zfar="100"/>
+    <headlight ambient="0.4 0.4 0.4" diffuse="0.4 0.4 0.4" specular="0.1 0.1 0.1"/>
+    <global offwidth="1920" offheight="1080"/>
+  </visual>
+
+  <default>
+    <joint armature="0" damping="0.0" limited="false"/>
+    <geom conaffinity="0" contype="0" condim="3" friction="0 0 0" rgba="0.5 0.5 0.5 1"/>
+  </default>
+
+  <worldbody>
+    <!-- Lighting -->
+    <light ambient="0.6 0.6 0.6" diffuse="0.3 0.3 0.3" specular="0 0 0" 
+           pos="5 5 10" dir="-0.3 -0.3 -1" castshadow="false"/>
+
+    <!-- Fixed cameras -->
+    <camera name="overhead_cam" pos="0 0 10" mode="fixed" xyaxes="1 0 0 0 1 0"/>
+    <camera name="isometric_cam" pos="6 -6 8" mode="fixed" xyaxes="0.707 0.707 0 -0.485 0.485 0.727"/>
+
+    <!-- Ground reference plane (for visualization only) -->
+    <geom name="floor" type="plane" size="5 5 0.1" material="grid_mat" 
+          pos="0 0 -3" rgba="0.3 0.3 0.3 0.3" contype="0" conaffinity="0"/>
+
+    <!-- Satellite body - free joint for full 6-DOF -->
+    <body name="satellite" pos="0 0 0">
+      <!-- Free joint: 3 translational + 3 rotational DOF -->
+      <freejoint name="satellite_free"/>
+
+      <!-- Main body: 290mm cube, 10 kg -->
+      <geom name="body" type="box" size="0.145 0.145 0.145"
+            mass="10.0"
+            pos="0 0 0"
+            material="mat_body"
+            contype="0" conaffinity="0"/>
+
+      <!-- Explicit inertia: uniform cube I = (1/6)*m*s^2 = 0.14 kg*m^2 -->
+      <inertial pos="0 0 0" mass="10.0"
+                diaginertia="0.14 0.14 0.14"/>
+
+      <!-- ============================================================ -->
+      <!-- 12 THRUSTERS: 2 per face direction for 6-DOF control        -->
+      <!-- Layout: +X, -X, +Y, -Y, +Z, -Z faces                        -->
+      <!-- ============================================================ -->
+      
+      <!-- +X face thrusters (push -X direction) -->
+      <site name="thruster1" pos="0.145 0.058 0" size="0.015" rgba="1 0 0 0.8"/>
+      <site name="thruster2" pos="0.145 -0.058 0" size="0.015" rgba="1 0.3 0 0.8"/>
+      
+      <!-- -X face thrusters (push +X direction) -->
+      <site name="thruster3" pos="-0.145 0.058 0" size="0.015" rgba="0 0 1 0.8"/>
+      <site name="thruster4" pos="-0.145 -0.058 0" size="0.015" rgba="0 0.3 1 0.8"/>
+      
+      <!-- +Y face thrusters (push -Y direction) -->
+      <site name="thruster5" pos="0.058 0.145 0" size="0.015" rgba="0 1 0 0.8"/>
+      <site name="thruster6" pos="-0.058 0.145 0" size="0.015" rgba="0.3 1 0 0.8"/>
+      
+      <!-- -Y face thrusters (push +Y direction) -->
+      <site name="thruster7" pos="0.058 -0.145 0" size="0.015" rgba="0 1 0.5 0.8"/>
+      <site name="thruster8" pos="-0.058 -0.145 0" size="0.015" rgba="0.3 1 0.5 0.8"/>
+      
+      <!-- +Z face thrusters (push -Z direction) -->
+      <site name="thruster9" pos="0.058 0 0.145" size="0.015" rgba="1 1 0 0.8"/>
+      <site name="thruster10" pos="-0.058 0 0.145" size="0.015" rgba="1 0.8 0 0.8"/>
+      
+      <!-- -Z face thrusters (push +Z direction) -->
+      <site name="thruster11" pos="0.058 0 -0.145" size="0.015" rgba="1 0 1 0.8"/>
+      <site name="thruster12" pos="-0.058 0 -0.145" size="0.015" rgba="0.8 0 1 0.8"/>
+
+      <!-- Track camera follows satellite -->
+      <camera name="track" mode="trackcom" pos="0 -5 3" xyaxes="1 0 0 0 0.5 1"/>
+    </body>
+  </worldbody>
+
+  <sensor>
+    <!-- Position sensors (from free joint) -->
+    <framepos name="pos" objtype="body" objname="satellite"/>
+    
+    <!-- Orientation sensor (quaternion) -->
+    <framequat name="quat" objtype="body" objname="satellite"/>
+    
+    <!-- Linear velocity sensor -->
+    <framelinvel name="linvel" objtype="body" objname="satellite"/>
+    
+    <!-- Angular velocity sensor -->
+    <frameangvel name="angvel" objtype="body" objname="satellite"/>
+  </sensor>
+
+  <!-- Note: Forces are applied programmatically via xfrc_applied in Python -->
+  <!-- No actuators needed since we apply forces directly -->
+
+</mujoco>
