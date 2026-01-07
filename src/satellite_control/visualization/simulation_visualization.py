@@ -718,18 +718,39 @@ class SimulationVisualizationManager:
         fps = max(1, min(fps, 60))
 
         try:
-            with imageio.get_writer(video_path, fps=fps) as writer:
-                for index, row in df.iterrows():
-                    # Parse state
-                    # Current_X, Current_Y, Current_VX, Current_VY, info...
-                    # We need Current_Yaw, Current_Angular_Vel as well
+            from src.satellite_control.utils.orientation_utils import euler_xyz_to_quat_wxyz
 
-                    data.qpos[0] = row["Current_X"]
-                    data.qpos[1] = row["Current_Y"]
-                    data.qpos[2] = row["Current_Yaw"]  # theta
-                    data.qvel[0] = row["Current_VX"]
-                    data.qvel[1] = row["Current_VY"]
-                    data.qvel[2] = row["Current_Angular_Vel"]  # omega
+            is_3d = "Current_Z" in df.columns or "Current_Roll" in df.columns
+
+            with imageio.get_writer(video_path, fps=fps) as writer:
+                for _, row in df.iterrows():
+                    if is_3d:
+                        x = float(row.get("Current_X", 0.0))
+                        y = float(row.get("Current_Y", 0.0))
+                        z = float(row.get("Current_Z", 0.0))
+                        roll = float(row.get("Current_Roll", 0.0))
+                        pitch = float(row.get("Current_Pitch", 0.0))
+                        yaw = float(row.get("Current_Yaw", 0.0))
+
+                        quat = euler_xyz_to_quat_wxyz((roll, pitch, yaw))
+                        data.qpos[0:3] = [x, y, z]
+                        data.qpos[3:7] = quat
+
+                        vx = float(row.get("Current_VX", 0.0))
+                        vy = float(row.get("Current_VY", 0.0))
+                        vz = float(row.get("Current_VZ", 0.0))
+                        wx = float(row.get("Current_WX", 0.0))
+                        wy = float(row.get("Current_WY", 0.0))
+                        wz = float(row.get("Current_WZ", 0.0))
+                        data.qvel[0:3] = [vx, vy, vz]
+                        data.qvel[3:6] = [wx, wy, wz]
+                    else:
+                        data.qpos[0] = row["Current_X"]
+                        data.qpos[1] = row["Current_Y"]
+                        data.qpos[2] = row.get("Current_Yaw", 0.0)  # theta
+                        data.qvel[0] = row.get("Current_VX", 0.0)
+                        data.qvel[1] = row.get("Current_VY", 0.0)
+                        data.qvel[2] = row.get("Current_Angular_Vel", row.get("Current_WZ", 0.0))
 
                     # Update physics to propogate kinematics
                     mujoco.mj_forward(self.satellite.model, data)
@@ -740,13 +761,14 @@ class SimulationVisualizationManager:
                     if cmd_str:
                         # Handle both comma and space separated values
                         cmd_vals = [float(x) for x in cmd_str.replace(",", " ").split()]
+                        thruster_count = max(12, len(cmd_vals))
                         # Active indices (1-based)
                         active_thrusters_indices = [
                             i + 1 for i, val in enumerate(cmd_vals) if val > 0.5
                         ]
 
                         try:
-                            for thruster_idx in range(1, 9):
+                            for thruster_idx in range(1, thruster_count + 1):
                                 site_name = f"thruster{thruster_idx}"
                                 site_id = mujoco.mj_name2id(
                                     self.satellite.model,
@@ -766,14 +788,7 @@ class SimulationVisualizationManager:
                                     else:
                                         # Dim
                                         original_colors = {
-                                            1: [1, 0, 0, 0.3],
-                                            2: [1, 0.2, 0, 0.3],
-                                            3: [0, 1, 0, 0.3],
-                                            4: [0.2, 1, 0, 0.3],
-                                            5: [0, 0, 1, 0.3],
-                                            6: [0, 0.2, 1, 0.3],
-                                            7: [1, 1, 0, 0.3],
-                                            8: [1, 0.8, 0, 0.3],
+                                            i: [0.0, 0.45, 1.0, 0.35] for i in range(1, 13)
                                         }
                                         self.satellite.model.site_rgba[site_id] = (
                                             original_colors.get(thruster_idx, [0.5, 0.5, 0.5, 0.3])

@@ -34,6 +34,7 @@ Configuration:
 """
 
 # from datetime import datetime # Removed unused
+import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -1130,6 +1131,8 @@ class SatelliteMPCLinearizedSimulation:
 
                     print("\n Auto-generating performance plots...")
                     self.auto_generate_visualizations()
+                    if hasattr(self.visualizer, "save_mujoco_video"):
+                        self.visualizer.save_mujoco_video(self.data_save_path)
                     print(" All visualizations complete!")
             else:
                 # Run with MuJoCo viewer or without animation
@@ -1149,9 +1152,23 @@ class SatelliteMPCLinearizedSimulation:
                 fast_batch_steps = steps_per_batch - 1
 
                 while self.is_running:
+                    step_only = False
+                    if (
+                        self.use_mujoco_viewer
+                        and hasattr(self.satellite, "is_viewer_paused")
+                        and self.satellite.is_viewer_paused()
+                    ):
+                        if hasattr(self.satellite, "consume_viewer_step") and self.satellite.consume_viewer_step():
+                            step_only = True
+                        else:
+                            if hasattr(self.satellite, "sync_viewer"):
+                                self.satellite.sync_viewer()
+                            time.sleep(0.01)
+                            continue
+
                     # Optimized Batch: Run physics steps without control logic
                     # overhead
-                    if batch_mode:
+                    if batch_mode and not step_only:
                         for _ in range(fast_batch_steps):
                             # Inline logic for speed
                             self.process_command_queue()

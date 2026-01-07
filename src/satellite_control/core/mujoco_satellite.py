@@ -59,6 +59,8 @@ class MuJoCoSatelliteSimulator:
         # Visualization mode
         self.use_mujoco_viewer = use_mujoco_viewer
         self.viewer = None
+        self.viewer_paused = False
+        self.viewer_step_request = False
 
         # Configuration from SatelliteConfig
         self.satellite_size = SatelliteConfig.SATELLITE_SIZE
@@ -276,8 +278,18 @@ class MuJoCoSatelliteSimulator:
             # Ensure an OpenGL backend is selected (helps on macOS)
             os.environ.setdefault("MUJOCO_GL", "glfw")
 
+            def _handle_keypress(key: int) -> None:
+                # Space or P: toggle pause. '.' or 'S': single-step.
+                if key in (ord(" "), ord("p"), ord("P")):
+                    self.viewer_paused = not self.viewer_paused
+                elif key in (ord("."), ord("s"), ord("S")):
+                    self.viewer_step_request = True
+                    self.viewer_paused = True
+
             # Launch passive viewer (non-blocking)
-            self.viewer = mujoco_viewer.launch_passive(self.model, self.data)
+            self.viewer = mujoco_viewer.launch_passive(
+                self.model, self.data, key_callback=_handle_keypress
+            )
 
             # Configure camera for top-down view of planar motion
             if self.viewer is not None:
@@ -288,6 +300,7 @@ class MuJoCoSatelliteSimulator:
                 self.viewer.cam.azimuth = 0  # Align with XY axis
 
             print("  MuJoCo viewer launched successfully")
+            print("  Viewer controls: Space/P = pause/resume, S/. = single-step")
 
         except Exception as e:
             print(
@@ -300,6 +313,22 @@ class MuJoCoSatelliteSimulator:
             self.use_mujoco_viewer = False
             self.viewer = None
             self.setup_plot()
+
+    def is_viewer_paused(self) -> bool:
+        """Return True if the MuJoCo viewer has paused the sim."""
+        return self.viewer is not None and self.viewer_paused
+
+    def consume_viewer_step(self) -> bool:
+        """Consume a pending single-step request."""
+        if self.viewer_step_request:
+            self.viewer_step_request = False
+            return True
+        return False
+
+    def sync_viewer(self) -> None:
+        """Sync the MuJoCo viewer if active."""
+        if self.use_mujoco_viewer and self.viewer is not None:
+            self.viewer.sync()
 
     @property
     def position(self) -> np.ndarray:
@@ -680,17 +709,10 @@ class MuJoCoSatelliteSimulator:
                         # This is a bit hacky, hardcoding the colors
                         # from XML or storing them
                         # For now, just dim them significantly
-                        original_colors = {
-                            1: [1, 0, 0, 0.3],
-                            2: [1, 0.2, 0, 0.3],
-                            3: [0, 1, 0, 0.3],
-                            4: [0.2, 1, 0, 0.3],
-                            5: [0, 0, 1, 0.3],
-                            6: [0, 0.2, 1, 0.3],
-                            7: [1, 1, 0, 0.3],
-                            8: [1, 0.8, 0, 0.3],
-                        }
-                        self.model.site_rgba[site_id] = original_colors.get(i, [0.5, 0.5, 0.5, 0.3])
+                        original_colors = {i: [0.0, 0.45, 1.0, 0.35] for i in range(1, 13)}
+                        self.model.site_rgba[site_id] = original_colors.get(
+                            i, [0.0, 0.45, 1.0, 0.35]
+                        )
 
         except Exception:
             # Prevent crashing if visual update fails

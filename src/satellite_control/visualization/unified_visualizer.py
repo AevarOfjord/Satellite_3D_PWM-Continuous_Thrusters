@@ -1145,7 +1145,6 @@ class UnifiedVisualizationGenerator:
             curr_yaw,
             active_thrusters,
         )
-        return []
 
         # Draw obstacles
         self.draw_obstacles()
@@ -1421,6 +1420,7 @@ class UnifiedVisualizationGenerator:
         self._generate_angular_tracking_plot(plots_dir)
         self._generate_angular_error_plot(plots_dir)
         self._generate_trajectory_plot(plots_dir)
+        self._generate_trajectory_3d_interactive_plot(plots_dir)
         self._generate_thruster_usage_plot(plots_dir)
         self._generate_thruster_valve_activity_plot(plots_dir)
         self._generate_pwm_quantization_plot(plots_dir)
@@ -1853,6 +1853,90 @@ class UnifiedVisualizationGenerator:
         )
 
         PlotStyle.save_figure(fig, plot_dir / "trajectory.png")
+
+    def _generate_trajectory_3d_interactive_plot(self, plot_dir: Path) -> None:
+        """Generate interactive 3D trajectory plot (HTML)."""
+        try:
+            import plotly.graph_objects as go
+        except ImportError:
+            import sys
+
+            print(
+                "Plotly not installed; skipping interactive 3D trajectory plot.",
+                file=sys.stderr,
+            )
+            return
+
+        x_pos = self._col("Current_X")
+        y_pos = self._col("Current_Y")
+        z_pos = self._col("Current_Z")
+        if len(x_pos) == 0 or len(y_pos) == 0 or len(z_pos) == 0:
+            print("No trajectory data available for interactive 3D plot.")
+            return
+
+        target_x_col = self._col("Target_X")
+        target_y_col = self._col("Target_Y")
+        target_z_col = self._col("Target_Z")
+        target_x = float(target_x_col[0]) if len(target_x_col) > 0 else 0.0
+        target_y = float(target_y_col[0]) if len(target_y_col) > 0 else 0.0
+        target_z = float(target_z_col[0]) if len(target_z_col) > 0 else 0.0
+
+        fig = go.Figure()
+        fig.add_trace(
+            go.Scatter3d(
+                x=x_pos,
+                y=y_pos,
+                z=z_pos,
+                mode="lines",
+                line=dict(color=PlotStyle.COLOR_SIGNAL_POS, width=4),
+                name="Trajectory",
+            )
+        )
+        fig.add_trace(
+            go.Scatter3d(
+                x=[x_pos[0]],
+                y=[y_pos[0]],
+                z=[z_pos[0]],
+                mode="markers",
+                marker=dict(size=5, color=PlotStyle.COLOR_SUCCESS),
+                name="Start",
+            )
+        )
+        fig.add_trace(
+            go.Scatter3d(
+                x=[x_pos[-1]],
+                y=[y_pos[-1]],
+                z=[z_pos[-1]],
+                mode="markers",
+                marker=dict(size=5, color=PlotStyle.COLOR_ERROR),
+                name="Final",
+            )
+        )
+        fig.add_trace(
+            go.Scatter3d(
+                x=[target_x],
+                y=[target_y],
+                z=[target_z],
+                mode="markers",
+                marker=dict(size=6, color=PlotStyle.COLOR_TARGET, symbol="x"),
+                name="Target",
+            )
+        )
+
+        fig.update_layout(
+            title=f"Interactive 3D Trajectory - {self.system_title}",
+            scene=dict(
+                xaxis_title="X (m)",
+                yaxis_title="Y (m)",
+                zaxis_title="Z (m)",
+                aspectmode="data",
+            ),
+            legend=dict(itemsizing="constant"),
+            margin=dict(l=0, r=0, t=40, b=0),
+        )
+
+        output_path = plot_dir / "trajectory_3d_interactive.html"
+        fig.write_html(output_path, include_plotlyjs="cdn")
 
     def _get_thruster_count(self) -> int:
         """Determine thruster count based on available data or config."""
