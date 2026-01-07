@@ -26,29 +26,22 @@ class SimulationLogger:
 
     def log_step(
         self,
-        # Typed as SimulationContext, but using Any to avoid circular
-        # imports at runtime if needed
+        # Typed as SimulationContext, but using Any
         context: Any,
         mpc_start_time: float,
         command_sent_time: float,
         thruster_action: np.ndarray,
-        # Removed mpc_computation_time from signature as per edit,
-        # it will be calculated or passed via mpc_info
         mpc_info: Optional[Dict[str, Any]],
     ) -> None:
         """
         Log detailed simulation step data using SimulationContext.
         """
-        # The following lines are moved/interpreted from the user's edit
-        # to be syntactically correct and functional within the method body.
-        # Assuming mpc_computation_time is now derived or passed in mpc_info.
-        # If mpc_info is None, initialize it as an empty dict to avoid errors.
         if mpc_info is None:
             mpc_info = {}
 
         # Unwrap context
-        current_state = context.current_state
-        target_state = context.target_state
+        current_state = context.current_state  # 13 elements
+        target_state = context.target_state  # 13 elements
         simulation_time = context.simulation_time
         control_update_interval = context.control_dt
         step_number = context.step_number
@@ -56,12 +49,35 @@ class SimulationLogger:
         waypoint_number = context.waypoint_number
         previous_thruster_action = context.previous_thruster_command
 
+        # Extract 3D State
+        # Pos
+        curr_x, curr_y, curr_z = current_state[0:3]
+        targ_x, targ_y, targ_z = target_state[0:3]
+
+        # Quat -> Yaw
+        q = current_state[3:7]
+        curr_yaw = np.arctan2(2 * (q[0] * q[3] + q[1] * q[2]), 1 - 2 * (q[2] ** 2 + q[3] ** 2))
+
+        q_t = target_state[3:7]
+        targ_yaw = np.arctan2(
+            2 * (q_t[0] * q_t[3] + q_t[1] * q_t[2]), 1 - 2 * (q_t[2] ** 2 + q_t[3] ** 2)
+        )
+
+        # Vel
+        curr_vx, curr_vy, curr_vz = current_state[7:10]
+        targ_vx, targ_vy, targ_vz = target_state[7:10]
+
+        # Ang Vel (Z)
+        curr_wz = current_state[12]
+        targ_wz = target_state[12]
+
         # Calculate errors
-        error_x = current_state[0] - target_state[0]
-        error_y = current_state[1] - target_state[1]
+        error_x = curr_x - targ_x
+        error_y = curr_y - targ_y
+        error_z = curr_z - targ_z
 
         # Angle difference
-        error_yaw = target_state[4] - current_state[4]
+        error_yaw = targ_yaw - curr_yaw
         error_yaw = (error_yaw + np.pi) % (2 * np.pi) - np.pi
 
         # Command strings
@@ -84,15 +100,13 @@ class SimulationLogger:
         mpc_solve_time = mpc_info.get("solve_time") if mpc_info else None
         mpc_iterations = mpc_info.get("iterations") if mpc_info else None
         mpc_optimality_gap = mpc_info.get("optimality_gap") if mpc_info else None
-        # Assuming mpc_computation_time is now derived from mpc_solve_time or other means
-        mpc_computation_time = mpc_info.get(
-            "mpc_computation_time", 0.0
-        )  # Default to 0 if not found
+        mpc_computation_time = mpc_info.get("mpc_computation_time", 0.0)
 
         # Velocity errors
-        error_vx = target_state[2] - current_state[2]
-        error_vy = target_state[3] - current_state[3]
-        error_angular_vel = target_state[5] - current_state[5]
+        error_vx = targ_vx - curr_vx
+        error_vy = targ_vy - curr_vy
+        error_vz = targ_vz - curr_vz
+        error_angular_vel = targ_wz - curr_wz
 
         # Active Thrusters
         total_active_thrusters = int(np.sum(thruster_action > 0.01))
@@ -100,9 +114,6 @@ class SimulationLogger:
         # Switches
         thruster_switches = 0
         if previous_thruster_action is not None:
-            # The user's edit here seems to be a copy-paste error from a control loop.
-            # It's syntactically incorrect and doesn't fit the logging context.
-            # Reverting to the original logic for calculating thruster switches.
             thruster_switches = int(
                 np.sum(np.abs(thruster_action - previous_thruster_action) > 0.01)
             )
@@ -115,26 +126,33 @@ class SimulationLogger:
             "CONTROL_DT": control_update_interval,
             "Mission_Phase": mission_phase,
             "Waypoint_Number": waypoint_number,
-            "Telemetry_X_mm": current_state[0] * 1000,
-            "Telemetry_Z_mm": current_state[1] * 1000,
-            "Telemetry_Yaw_deg": np.degrees(current_state[4]),
-            "Current_X": current_state[0],
-            "Current_Y": current_state[1],
-            "Current_Yaw": current_state[4],
-            "Current_VX": current_state[2],
-            "Current_VY": current_state[3],
-            "Current_Angular_Vel": current_state[5],
-            "Target_X": target_state[0],
-            "Target_Y": target_state[1],
-            "Target_Yaw": target_state[4],
-            "Target_VX": target_state[2],
-            "Target_VY": target_state[3],
-            "Target_Angular_Vel": target_state[5],
+            "Telemetry_X_mm": curr_x * 1000,
+            "Telemetry_Y_mm": curr_y * 1000,
+            "Telemetry_Z_mm": curr_z * 1000,
+            "Telemetry_Yaw_deg": np.degrees(curr_yaw),
+            "Current_X": curr_x,
+            "Current_Y": curr_y,
+            "Current_Z": curr_z,
+            "Current_Yaw": curr_yaw,
+            "Current_VX": curr_vx,
+            "Current_VY": curr_vy,
+            "Current_VZ": curr_vz,
+            "Current_Angular_Vel": curr_wz,
+            "Target_X": targ_x,
+            "Target_Y": targ_y,
+            "Target_Z": targ_z,
+            "Target_Yaw": targ_yaw,
+            "Target_VX": targ_vx,
+            "Target_VY": targ_vy,
+            "Target_VZ": targ_vz,
+            "Target_Angular_Vel": targ_wz,
             "Error_X": error_x,
             "Error_Y": error_y,
+            "Error_Z": error_z,
             "Error_Yaw": error_yaw,
             "Error_VX": error_vx,
             "Error_VY": error_vy,
+            "Error_VZ": error_vz,
             "Error_Angular_Vel": error_angular_vel,
             "MPC_Computation_Time": mpc_computation_time,
             "MPC_Status": mpc_status_name,
@@ -169,11 +187,27 @@ class SimulationLogger:
         """
         Log high-frequency physics data.
         """
-        # Calculate errors
-        error_x = target_state[0] - current_state[0]
-        error_y = target_state[1] - current_state[1]
+        # Extract 3D components
+        curr_x, curr_y = current_state[0:2]
 
-        raw_yaw_error = target_state[4] - current_state[4]
+        q = current_state[3:7]
+        curr_yaw = np.arctan2(2 * (q[0] * q[3] + q[1] * q[2]), 1 - 2 * (q[2] ** 2 + q[3] ** 2))
+
+        curr_vx, curr_vy = current_state[7:9]
+        curr_wz = current_state[12]
+
+        targ_x, targ_y = target_state[0:2]
+
+        q_t = target_state[3:7]
+        targ_yaw = np.arctan2(
+            2 * (q_t[0] * q_t[3] + q_t[1] * q_t[2]), 1 - 2 * (q_t[2] ** 2 + q_t[3] ** 2)
+        )
+
+        # Calculate errors
+        error_x = targ_x - curr_x
+        error_y = targ_y - curr_y
+
+        raw_yaw_error = targ_yaw - curr_yaw
         if normalize_angle_func:
             error_yaw = normalize_angle_func(raw_yaw_error)
         else:
@@ -185,23 +219,24 @@ class SimulationLogger:
 
         entry = {
             "Time": f"{simulation_time:.4f}",
-            "Current_X": f"{current_state[0]:.5f}",
-            "Current_Y": f"{current_state[1]:.5f}",
-            "Current_Yaw": f"{current_state[4]:.5f}",
-            "Current_VX": f"{current_state[2]:.5f}",
-            "Current_VY": f"{current_state[3]:.5f}",
-            "Current_Angular_Vel": f"{current_state[5]:.5f}",
-            "Target_X": f"{target_state[0]:.5f}",
-            "Target_Y": f"{target_state[1]:.5f}",
-            "Target_Yaw": f"{target_state[4]:.5f}",
+            "Current_X": f"{curr_x:.5f}",
+            "Current_Y": f"{curr_y:.5f}",
+            "Current_Yaw": f"{curr_yaw:.5f}",
+            "Current_VX": f"{curr_vx:.5f}",
+            "Current_VY": f"{curr_vy:.5f}",
+            "Current_Angular_Vel": f"{curr_wz:.5f}",
+            "Target_X": f"{targ_x:.5f}",
+            "Target_Y": f"{targ_y:.5f}",
+            "Target_Yaw": f"{targ_yaw:.5f}",
             "Error_X": f"{error_x:.5f}",
             "Error_Y": f"{error_y:.5f}",
             "Error_Yaw": f"{error_yaw:.5f}",
             "Command_Vector": cmd_vec_str,
         }
 
-        # Log Thruster States
-        for i in range(8):
+        # Log Thruster States (12 thrusters)
+        num_thrusters = len(thruster_actual_output)
+        for i in range(num_thrusters):
             entry[f"Thruster_{i+1}_Cmd"] = f"{thruster_last_command[i]:.3f}"
             entry[f"Thruster_{i+1}_Val"] = f"{thruster_actual_output[i]:.3f}"
 

@@ -189,10 +189,20 @@ class SatelliteMPCLinearizedSimulation:
         self.initial_start_pos = np.array(start_pos, dtype=np.float64)
         self.initial_start_angle = start_angle
 
-        # Point-to-point mode
-        self.target_state = np.array([target_pos[0], target_pos[1], 0.0, 0.0, target_angle, 0.0])
+        # Point-to-point mode (3D State: [p(3), q(4), v(3), w(3)])
+        # Target State
+        self.target_state = np.zeros(13)
+        self.target_state[0:2] = target_pos  # x, y
+        self.target_state[2] = 0.0  # z
+        # Target Orientation (Z-rotation)
+        half_theta = target_angle / 2.0
+        self.target_state[3] = np.cos(half_theta)  # w
+        self.target_state[6] = np.sin(half_theta)  # z (qx=qy=0)
+        # Velocities = 0
+
         logger.info(
-            f"INFO: POINT-TO-POINT MODE: " f"Target ({target_pos[0]:.2f}, {target_pos[1]:.2f})"
+            f"INFO: POINT-TO-POINT MODE: "
+            f"Target ({target_pos[0]:.2f}, {target_pos[1]:.2f}, 0.00)"
         )
 
         # satellite_params = SatelliteConfig.get_app_config().physics # Removed
@@ -358,17 +368,18 @@ class SatelliteMPCLinearizedSimulation:
         self.visualizer = create_simulation_visualizer(self)
 
     def get_current_state(self) -> np.ndarray:
-        """Get current satellite state as [x, y, vx, vy, theta, omega]."""
-        return np.array(
-            [
-                self.satellite.position[0],
-                self.satellite.position[1],
-                self.satellite.velocity[0],
-                self.satellite.velocity[1],
-                self.satellite.angle,
-                self.satellite.angular_velocity,
-            ]
-        )
+        """Get current satellite state [pos(3), quat(4), vel(3), ang_vel(3)]."""
+        s = self.satellite
+        # [x, y, z]
+        pos = s.position
+        # [w, x, y, z]
+        quat = s.quaternion
+        # [vx, vy, vz]
+        vel = s.velocity
+        # [wx, wy, wz]
+        ang_vel = s.angular_velocity
+
+        return np.concatenate([pos, quat, vel, ang_vel])
 
     # Backward-compatible properties delegating to ThrusterManager
     @property
@@ -703,10 +714,14 @@ class SatelliteMPCLinearizedSimulation:
                 )
 
             # Print status with timing information
-            pos_error = np.linalg.norm(current_state[:2] - self.target_state[:2])
-            ang_error = abs(
-                self.angle_difference(float(self.target_state[4]), float(current_state[4]))
-            )
+            pos_error = np.linalg.norm(current_state[:3] - self.target_state[:3])
+
+            # Quaternion error: 2 * arccos(|<q1, q2>|)
+            q1 = current_state[3:7]
+            q2 = self.target_state[3:7]
+            dot = np.abs(np.dot(q1, q2))
+            dot = min(1.0, max(-1.0, dot))
+            ang_error = 2.0 * np.arccos(dot)
 
             # Determine status message
             status_msg = f"Traveling to Target (t={self.simulation_time:.1f}s)"
@@ -747,12 +762,20 @@ class SatelliteMPCLinearizedSimulation:
             def fmt_state(s):
                 x_mm = s[0] * 1000
                 y_mm = s[1] * 1000
-                # Normalize angle to [-180, 180] for display
-                theta_rad = np.arctan2(np.sin(s[4]), np.cos(s[4]))
-                theta_deg = np.degrees(theta_rad)
-                return f"[x:{x_mm:.1f}, y:{y_mm:.1f}]mm θ:{theta_deg:.1f}°"
+                z_mm = s[2] * 1000
+                # Display Roll/Pitch/Yaw
+                # Simpler: just Z-angle if we assume flat?
+                # But it's 3D.
+                # Let's show Quat or convert to Euler?
+                # Using simple Z-axis rotation approximation for logging conciseness?
+                # No, show Euler. mju_quat2Mat logic...
+                # Simple conversion to "Yaw" approx
+                q = s[3:7]
+                yaw = np.arctan2(2 * (q[0] * q[3] + q[1] * q[2]), 1 - 2 * (q[2] ** 2 + q[3] ** 2))
+                yaw_deg = np.degrees(yaw)
+                return f"[x:{x_mm:.0f}, y:{y_mm:.0f}, z:{z_mm:.0f}]mm Yaw:{yaw_deg:.1f}°"
 
-            safe_target = self.target_state if self.target_state is not None else np.zeros(6)
+            safe_target = self.target_state if self.target_state is not None else np.zeros(13)
 
             ang_err_deg = np.degrees(ang_error)
             solve_ms = mpc_info.get("solve_time", 0) * 1000

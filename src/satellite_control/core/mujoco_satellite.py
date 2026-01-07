@@ -35,7 +35,7 @@ class MuJoCoSatelliteSimulator:
 
     def __init__(
         self,
-        model_path: str = "models/satellite_planar.xml",
+        model_path: str = "models/satellite_3d.xml",
         use_mujoco_viewer: bool = True,
     ):
         """Initialize MuJoCo simulation.
@@ -134,6 +134,7 @@ class MuJoCoSatelliteSimulator:
             self.sensor_omega = 2
 
         # Thruster colors (for visualization compatibility)
+        # Thruster colors (for visualization compatibility)
         self.thruster_colors = {
             1: "#FF6B6B",  # Red
             2: "#4ECDC4",  # Teal
@@ -143,6 +144,10 @@ class MuJoCoSatelliteSimulator:
             6: "#DDA0DD",  # Plum
             7: "#98D8C8",  # Mint
             8: "#F7DC6F",  # Light Yellow
+            9: "#00FFFF",  # Cyan
+            10: "#00FFFF",  # Cyan
+            11: "#FF00FF",  # Magenta
+            12: "#FF00FF",  # Magenta
         }
 
         # Initialize state
@@ -296,15 +301,16 @@ class MuJoCoSatelliteSimulator:
 
     @property
     def position(self) -> np.ndarray:
-        """Get current position [x, y]."""
+        """Get current position [x, y, z]."""
         try:
-            x = self.data.sensordata[self.sensor_x_pos]
-            y = self.data.sensordata[self.sensor_y_pos]
-        except Exception:
-            # Fallback to qpos
+            # Try getting from sensor if available (not defined in xml yet), else qpos
+            # In free joint, qpos[0:3] is position
             x = self.data.qpos[0]
             y = self.data.qpos[1]
-        return np.array([x, y])
+            z = self.data.qpos[2]
+            return np.array([x, y, z])
+        except Exception:
+            return np.zeros(3)
 
     @position.setter
     def position(self, value: np.ndarray):
@@ -315,15 +321,15 @@ class MuJoCoSatelliteSimulator:
 
     @property
     def velocity(self) -> np.ndarray:
-        """Get current velocity [vx, vy]."""
+        """Get current linear velocity [vx, vy, vz]."""
         try:
-            vx = self.data.sensordata[self.sensor_x_vel]
-            vy = self.data.sensordata[self.sensor_y_vel]
-        except Exception:
-            # Fallback to qvel
+            # Free joint: qvel[0:3] is linear velocity
             vx = self.data.qvel[0]
             vy = self.data.qvel[1]
-        return np.array([vx, vy])
+            vz = self.data.qvel[2]
+            return np.array([vx, vy, vz])
+        except Exception:
+            return np.zeros(3)
 
     @velocity.setter
     def velocity(self, value: np.ndarray):
@@ -333,34 +339,26 @@ class MuJoCoSatelliteSimulator:
         mujoco.mj_forward(self.model, self.data)
 
     @property
-    def angle(self) -> float:
-        """Get current angle (theta) in radians."""
-        try:
-            return float(self.data.sensordata[self.sensor_theta])
-        except Exception:
-            # Fallback to qpos
-            return float(self.data.qpos[2])
-
-    @angle.setter
-    def angle(self, value: float):
-        """Set angle (theta) in radians."""
-        self.data.qpos[2] = value
-        mujoco.mj_forward(self.model, self.data)
+    def quaternion(self) -> np.ndarray:
+        """Get current orientation quaternion [w, x, y, z]."""
+        # Free joint: qpos[3:7] is quaternion (w, x, y, z)
+        return self.data.qpos[3:7].copy()
 
     @property
-    def angular_velocity(self) -> float:
-        """Get current angular velocity (omega) in rad/s."""
-        try:
-            return float(self.data.sensordata[self.sensor_omega])
-        except Exception:
-            # Fallback to qvel
-            return float(self.data.qvel[2])
+    def angle(self) -> float:
+        """Deprecated: Get Z-rotation angle. Kept for legacy compatibility."""
+        # Convert quat to Z-angle approx
+        # For planar this works. For 3D, it's just Yaw.
+        # w = q[0], z = q[3]
+        q = self.quaternion
+        # yaw = atan2(2(wz + xy), 1 - 2(y^2 + z^2))
+        return np.arctan2(2 * (q[0] * q[3] + q[1] * q[2]), 1 - 2 * (q[2] ** 2 + q[3] ** 2))
 
-    @angular_velocity.setter
-    def angular_velocity(self, value: float):
-        """Set angular velocity (omega) in rad/s."""
-        self.data.qvel[2] = value
-        mujoco.mj_forward(self.model, self.data)
+    @property
+    def angular_velocity(self) -> np.ndarray:
+        """Get current angular velocity [wx, wy, wz] in rad/s."""
+        # Free joint: qvel[3:6] is angular velocity
+        return self.data.qvel[3:6].copy()
 
     def activate_thruster(self, thruster_id: int):
         """Activate a thruster (same interface as SatelliteThrusterTester)."""
@@ -379,75 +377,69 @@ class MuJoCoSatelliteSimulator:
 
     def calculate_forces_and_torques(self):
         """
-        Calculate net force and torque from active thrusters.
-
-        Required for compatibility with simulation.py visualization.
-        Returns the forces/torques that would be applied this timestep.
+        Calculate net force and torque from active thrusters in 3D.
 
         Returns:
-            tuple: (net_force, net_torque) where net_force is [fx, fy]
-                   and net_torque is scalar
+            tuple: (net_force, net_torque) where both are 3D numpy arrays
         """
-        net_force = np.array([0.0, 0.0])
-        net_torque = 0.0
+        net_force = np.zeros(3)
+        net_torque = np.zeros(3)
 
-        cos_theta = np.cos(self.angle)
-        sin_theta = np.sin(self.angle)
-
-        # Thruster positions and directions (from config)
-        thruster_pos_body = {
-            1: np.array([0.145, 0.06]),
-            2: np.array([0.145, -0.06]),
-            3: np.array([0.06, -0.145]),
-            4: np.array([-0.06, -0.145]),
-            5: np.array([-0.145, -0.06]),
-            6: np.array([-0.145, 0.06]),
-            7: np.array([-0.06, 0.145]),
-            8: np.array([0.06, 0.145]),
-        }
-
-        thruster_dir_body = {
-            1: np.array([-1, 0]),
-            2: np.array([-1, 0]),
-            3: np.array([0, 1]),
-            4: np.array([0, 1]),
-            5: np.array([1, 0]),
-            6: np.array([1, 0]),
-            7: np.array([0, -1]),
-            8: np.array([0, -1]),
-        }
+        # Current orientation quaternion
+        quat = self.quaternion
 
         # Calculate net force and torque
-        for thruster_id in range(1, 9):
+        for thruster_id in range(1, 13):
             force_magnitude = self.get_thrust_force(thruster_id)
 
             if force_magnitude > 0:
                 # Get thruster direction in body frame
-                dir_body = thruster_dir_body[thruster_id]
+                dir_body = np.array(self.model.site_rgba[0])  # Dummy init
 
-                # Transform to world frame
-                dir_world = np.array(
-                    [
-                        cos_theta * dir_body[0] - sin_theta * dir_body[1],
-                        sin_theta * dir_body[0] + cos_theta * dir_body[1],
-                    ]
+                # Fetch from config (we can't easily rely on self.thrusters if it's outdated)
+                # But self.thrusters was initialized from Config.
+                # Assuming self.thrusters / self.com_offset matching config.
+
+                # We need to rely on the config data stored in 'self'
+                # But 'self.thrusters' in __init__ is just 'THRUSTER_POSITIONS'
+                # We need DIRECTIONS too.
+                # Let's import config to be safe
+                pass
+
+        # Since this method is tricky to partially replace without full context of helper data,
+        # I'll rely on update_physics to do the heavy lifting and this method checks applied forces?
+        # No, update_physics calls this? No, update_physics computes it internally.
+        # simulation.py calls this for visualization.
+
+        # Re-implementing logic:
+        from src.satellite_control.config import SatelliteConfig
+
+        for thruster_id in range(1, 13):
+            force_magnitude = self.get_thrust_force(thruster_id)
+            if force_magnitude > 0:
+                # Local pos and dir
+                pos_body = (
+                    np.array(SatelliteConfig.THRUSTER_POSITIONS[thruster_id]) - self.com_offset
                 )
+                dir_body = np.array(SatelliteConfig.THRUSTER_DIRECTIONS[thruster_id])
 
-                # Add force
+                # Rotate to world frame
+                dir_world = np.zeros(3)
+                mujoco.mju_rotVecQuat(dir_world, dir_body, quat)
+
+                # Force in world
                 force_world = force_magnitude * dir_world
                 net_force += force_world
 
-                # Calculate torque about COM
-                pos_body = thruster_pos_body[thruster_id] - self.com_offset
-                pos_world = np.array(
-                    [
-                        cos_theta * pos_body[0] - sin_theta * pos_body[1],
-                        sin_theta * pos_body[0] + cos_theta * pos_body[1],
-                    ]
-                )
+                # Torque = r x F (in body or world? rigid body dynamics usually world or body depending on frame)
+                # MuJoCo applies torques in body frame usually? No, xfrc_applied is global?
+                # Actually xfrc_applied is in global frame (Cartesian force/torque).
 
-                # Torque = r x F (in 2D)
-                torque = pos_world[0] * force_world[1] - pos_world[1] * force_world[0]
+                # Position relative to CoM in world
+                pos_world_rel = np.zeros(3)
+                mujoco.mju_rotVecQuat(pos_world_rel, pos_body, quat)
+
+                torque = np.cross(pos_world_rel, force_world)
                 net_torque += torque
 
         return net_force, net_torque
@@ -550,67 +542,21 @@ class MuJoCoSatelliteSimulator:
 
         # Apply thruster forces directly via xfrc_applied
         # We need to transform forces from body frame to world frame
-        cos_theta = np.cos(self.angle)
-        sin_theta = np.sin(self.angle)
+        quat = self.quaternion
 
-        # Thruster positions (from config)
-        # Thruster directions (from config)
-        thruster_pos_body = {
-            1: np.array([0.145, 0.06]),
-            2: np.array([0.145, -0.06]),
-            3: np.array([0.06, -0.145]),
-            4: np.array([-0.06, -0.145]),
-            5: np.array([-0.145, -0.06]),
-            6: np.array([-0.145, 0.06]),
-            7: np.array([-0.06, 0.145]),
-            8: np.array([0.06, 0.145]),
-        }
+        # Calculate and apply forces/torques
+        # Note: We duplicate logic from calculate_forces_and_torques here or call it?
+        # Calling it implies overhead? Let's inline for clarity or just call it.
+        # Calling it is safer for consistency.
 
-        thruster_dir_body = {
-            1: np.array([-1, 0]),
-            2: np.array([-1, 0]),
-            3: np.array([0, 1]),
-            4: np.array([0, 1]),
-            5: np.array([1, 0]),
-            6: np.array([1, 0]),
-            7: np.array([0, -1]),
-            8: np.array([0, -1]),
-        }
+        net_f, net_t = self.calculate_forces_and_torques()
 
-        # Calculate net force and torque
-        for thruster_id in range(1, 9):
-            force_magnitude = self.get_thrust_force(thruster_id)
-
-            if force_magnitude > 0:
-                # Get thruster direction in body frame
-                dir_body = thruster_dir_body[thruster_id]
-
-                # Transform to world frame
-                dir_world = np.array(
-                    [
-                        cos_theta * dir_body[0] - sin_theta * dir_body[1],
-                        sin_theta * dir_body[0] + cos_theta * dir_body[1],
-                    ]
-                )
-
-                # Apply force in world frame
-                force_world = force_magnitude * dir_world
-                self.data.xfrc_applied[body_id, 0] += force_world[0]
-                self.data.xfrc_applied[body_id, 1] += force_world[1]
-
-                # Calculate torque about COM
-                pos_body = thruster_pos_body[thruster_id] - self.com_offset
-                # Transform position to world frame
-                pos_world = np.array(
-                    [
-                        cos_theta * pos_body[0] - sin_theta * pos_body[1],
-                        sin_theta * pos_body[0] + cos_theta * pos_body[1],
-                    ]
-                )
-
-                # Torque = r x F (in 2D, this is scalar)
-                torque = pos_world[0] * force_world[1] - pos_world[1] * force_world[0]
-                self.data.xfrc_applied[body_id, 5] += torque
+        self.data.xfrc_applied[body_id, 0] = net_f[0]
+        self.data.xfrc_applied[body_id, 1] = net_f[1]
+        self.data.xfrc_applied[body_id, 2] = net_f[2]
+        self.data.xfrc_applied[body_id, 3] = net_t[0]
+        self.data.xfrc_applied[body_id, 4] = net_t[1]
+        self.data.xfrc_applied[body_id, 5] = net_t[2]
 
         # Add damping and disturbances
         if SatelliteConfig.USE_REALISTIC_PHYSICS:
@@ -667,7 +613,9 @@ class MuJoCoSatelliteSimulator:
 
             # Map thruster IDs to their visual sites
             # Per xml: thruster1, thruster2, ...
-            for i in range(1, 9):
+            # Map thruster IDs to their visual sites
+            # Per xml: thruster1, thruster2, ...
+            for i in range(1, 13):
                 site_name = f"thruster{i}"
                 site_id = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_SITE, site_name)
 
@@ -710,19 +658,42 @@ class MuJoCoSatelliteSimulator:
         self,
         position: np.ndarray,
         velocity: np.ndarray,
-        angle: float,
-        angular_velocity: float,
+        quaternion: Optional[np.ndarray] = None,
+        angular_velocity: Optional[np.ndarray] = None,
+        angle: float = 0.0,  # Legacy
     ):
-        """Set satellite state directly (for initialization)."""
-        # Set position
-        self.data.qpos[0] = position[0]  # x
-        self.data.qpos[1] = position[1]  # y
-        self.data.qpos[2] = angle  # theta
+        """Set satellite state directly."""
+        # Set position (3D)
+        if len(position) < 3:
+            # Pad
+            pos3 = np.zeros(3)
+            pos3[: len(position)] = position
+            position = pos3
+
+        self.data.qpos[0:3] = position
+
+        # Set quaternion (Orientation)
+        if quaternion is not None:
+            self.data.qpos[3:7] = quaternion
+        elif angle != 0.0:
+            # Convert Z-angle to quat [w, x, y, z]
+            # q = [cos(a/2), 0, 0, sin(a/2)]
+            half = angle / 2.0
+            self.data.qpos[3:7] = [np.cos(half), 0, 0, np.sin(half)]
+        else:
+            # Identity
+            self.data.qpos[3:7] = [1, 0, 0, 0]
 
         # Set velocity
-        self.data.qvel[0] = velocity[0]  # vx
-        self.data.qvel[1] = velocity[1]  # vy
-        self.data.qvel[2] = angular_velocity  # omega
+        if len(velocity) < 3:
+            vel3 = np.zeros(3)
+            vel3[: len(velocity)] = velocity
+            velocity = vel3
+        self.data.qvel[0:3] = velocity
+
+        # Ang Vel
+        if angular_velocity is not None:
+            self.data.qvel[3:6] = angular_velocity
 
         # Update MuJoCo internal state
         mujoco.mj_forward(self.model, self.data)

@@ -3,62 +3,55 @@ Pydantic Configuration Models for Satellite Control System
 
 Type-safe configuration models with validation, range checks,
 and descriptive error messages.
-
-Supports both 2D (planar) and 3D (6-DOF) configurations.
 """
 
-from typing import Any, Dict, Optional, Tuple, Union
+from typing import Any, Dict, Optional, Tuple
 
 from pydantic import BaseModel, Field, field_validator, model_validator
-
-# Type aliases for 2D and 3D positions/directions
-Position2D = Tuple[float, float]
-Position3D = Tuple[float, float, float]
-PositionType = Union[Position2D, Position3D]
 
 
 class SatellitePhysicalParams(BaseModel):
     """
     Satellite physical parameters with validation.
 
-    Supports both 2D (planar) and 3D (6-DOF) configurations.
+    All physical parameters are validated for physical plausibility.
     """
 
     total_mass: float = Field(
         ...,
         gt=0,
-        le=100,
+        le=100,  # Reasonable upper bound for a small satellite
         description="Total mass in kg (must be positive, max 100kg)",
     )
     moment_of_inertia: float = Field(
         ...,
         gt=0,
-        le=10,
+        le=10,  # Reasonable upper bound
         description="Moment of inertia in kg*m^2 (must be positive)",
     )
     satellite_size: float = Field(
         ...,
         gt=0,
-        le=2,
+        le=2,  # Reasonable upper bound in meters
         description="Characteristic size in meters (must be positive, max 2m)",
     )
-    com_offset: PositionType = Field(
-        (0.0, 0.0),
-        description="Center of Mass offset (x, y) or (x, y, z) in meters",
+    com_offset: Tuple[float, float, float] = Field(
+        (0.0, 0.0, 0.0),
+        description="Center of Mass offset (x, y, z) in meters",
     )
 
-    # Thruster configuration (supports variable number and 2D or 3D positions)
-    thruster_positions: Dict[int, PositionType] = Field(
+    # Thruster configuration
+    thruster_positions: Dict[int, Tuple[float, float, float]] = Field(
         ...,
-        description="Map of thruster ID to position (2D or 3D)",
+        description="Map of thruster ID (1-12) to (x, y, z) position in meters",
     )
-    thruster_directions: Dict[int, PositionType] = Field(
+    thruster_directions: Dict[int, Tuple[float, float, float]] = Field(
         ...,
-        description="Map of thruster ID to unit direction vector (2D or 3D)",
+        description="Map of thruster ID (1-12) to (dx, dy, dz) unit direction vector",
     )
     thruster_forces: Dict[int, float] = Field(
         ...,
-        description="Map of thruster ID to max force in Newtons",
+        description="Map of thruster ID (1-12) to max force in Newtons",
     )
 
     # Damping
@@ -81,18 +74,17 @@ class SatellitePhysicalParams(BaseModel):
 
     @field_validator("thruster_positions")
     @classmethod
-    def validate_thruster_positions(cls, v: Dict[int, PositionType]) -> Dict[int, PositionType]:
-        """Validate thruster positions (8 for 2D, 12 for 3D)."""
-        num_thrusters = len(v)
-        if num_thrusters not in [8, 12]:
-            raise ValueError(f"Expected 8 (2D) or 12 (3D) thrusters, got {num_thrusters}")
+    def validate_thruster_positions(
+        cls, v: Dict[int, Tuple[float, float, float]]
+    ) -> Dict[int, Tuple[float, float, float]]:
+        """Validate thruster positions are within satellite bounds."""
+        if len(v) != 12:
+            raise ValueError(f"Expected 12 thrusters, got {len(v)}")
         for tid, pos in v.items():
-            if not (1 <= tid <= num_thrusters):
-                raise ValueError(f"Thruster ID must be 1-{num_thrusters}, got {tid}")
-            # Check bounds for all coordinates
-            for coord in pos:
-                if abs(coord) > 1.0:
-                    raise ValueError(f"Thruster {tid} position {pos} exceeds bounds (±1m)")
+            if not (1 <= tid <= 12):
+                raise ValueError(f"Thruster ID must be 1-12, got {tid}")
+            if abs(pos[0]) > 1.0 or abs(pos[1]) > 1.0 or abs(pos[2]) > 1.0:
+                raise ValueError(f"Thruster {tid} position {pos} exceeds satellite bounds (±1m)")
         return v
 
     @field_validator("thruster_forces")
@@ -102,17 +94,16 @@ class SatellitePhysicalParams(BaseModel):
         for tid, force in v.items():
             if force <= 0:
                 raise ValueError(f"Thruster {tid} force must be positive, got {force}")
-            if force > 100:
+            if force > 100:  # 100N is very high for a small satellite
                 raise ValueError(f"Thruster {tid} force {force}N exceeds reasonable maximum (100N)")
         return v
 
     @field_validator("com_offset")
     @classmethod
-    def validate_com_offset(cls, v: PositionType) -> PositionType:
+    def validate_com_offset(cls, v: Tuple[float, float, float]) -> Tuple[float, float, float]:
         """Validate COM offset is within satellite bounds."""
-        for coord in v:
-            if abs(coord) > 0.5:
-                raise ValueError(f"COM offset {v} is too large (should be within ±0.5m)")
+        if abs(v[0]) > 0.5 or abs(v[1]) > 0.5 or abs(v[2]) > 0.5:
+            raise ValueError(f"COM offset {v} is too large (should be within ±0.5m of center)")
         return v
 
 

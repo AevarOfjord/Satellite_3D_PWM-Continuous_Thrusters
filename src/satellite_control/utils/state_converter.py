@@ -34,13 +34,18 @@ class StateConverter:
         Convert simulation state to MPC state format.
 
         Args:
-            state: [x, y, vx, vy, theta, omega] - 6 element array
+            state: [x, y, vx, vy, theta, omega] (2D) OR
+                   [x, y, z, qw, qx, qy, qz, vx, vy, vz, wx, wy, wz] (3D)
 
         Returns:
-            [x, y, theta, vx, vy, omega] - 6 element array
+            Converted state vector
         """
+        # 3D State (Identity)
+        if len(state) == 13:
+            return state.copy()
+
         if len(state) != 6:
-            raise ValueError(f"Expected 6-element state, got {len(state)}")
+            raise ValueError(f"Expected 6 or 13-element state, got {len(state)}")
 
         return np.array(
             [
@@ -60,13 +65,18 @@ class StateConverter:
         Convert MPC state to simulation state format.
 
         Args:
-            state: [x, y, theta, vx, vy, omega] - 6 element array
+            state: [x, y, theta, vx, vy, omega] (2D) OR
+                   [x, y, z, qw, qx, qy, qz, vx, vy, vz, wx, wy, wz] (3D)
 
         Returns:
-            [x, y, vx, vy, theta, omega] - 6 element array
+            Converted state vector
         """
+        # 3D State (Identity)
+        if len(state) == 13:
+            return state.copy()
+
         if len(state) != 6:
-            raise ValueError(f"Expected 6-element state, got {len(state)}")
+            raise ValueError(f"Expected 6 or 13-element state, got {len(state)}")
 
         return np.array(
             [

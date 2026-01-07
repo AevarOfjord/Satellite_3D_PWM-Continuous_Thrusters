@@ -203,19 +203,18 @@ class SimulationVisualizationManager:
         self.satellite.ax_main.set_ylim(ylim)
         self.satellite.ax_main.set_aspect("equal")
         self.satellite.ax_main.grid(True, alpha=0.3)
-        self.satellite.ax_main.set_xlabel(
-            "X Position (m)", fontsize=12, fontweight="bold"
-        )
-        self.satellite.ax_main.set_ylabel(
-            "Y Position (m)", fontsize=12, fontweight="bold"
-        )
+        self.satellite.ax_main.set_xlabel("X Position (m)", fontsize=12, fontweight="bold")
+        self.satellite.ax_main.set_ylabel("Y Position (m)", fontsize=12, fontweight="bold")
 
         # Draw target elements FIRST with highest z-order
         if self.target_state is not None:
-            target_x, target_y, target_angle = (
-                self.target_state[0],
-                self.target_state[1],
-                self.target_state[4],
+            # Extract 2D components from 3D target
+            target_x = self.target_state[0]
+            target_y = self.target_state[1]
+            # Yaw from Quat [w, x, y, z] -> [3:7]
+            q_t = self.target_state[3:7]
+            target_angle = np.arctan2(
+                2 * (q_t[0] * q_t[3] + q_t[1] * q_t[2]), 1 - 2 * (q_t[2] ** 2 + q_t[3] ** 2)
             )
         else:
             target_x, target_y, target_angle = 0.0, 0.0, 0.0
@@ -235,9 +234,9 @@ class SimulationVisualizationManager:
 
         # Target orientation arrow
         target_arrow_length = 0.2
-        target_arrow_end = np.array(
-            [target_x, target_y]
-        ) + target_arrow_length * np.array([np.cos(target_angle), np.sin(target_angle)])
+        target_arrow_end = np.array([target_x, target_y]) + target_arrow_length * np.array(
+            [np.cos(target_angle), np.sin(target_angle)]
+        )
         arrow = self.satellite.ax_main.annotate(
             "",
             xy=target_arrow_end,
@@ -262,11 +261,23 @@ class SimulationVisualizationManager:
 
         # Update title with current metrics
         current_state = self.get_current_state()
+
+        # Extract Yaw
+        q_c = current_state[3:7]
+        curr_yaw = np.arctan2(
+            2 * (q_c[0] * q_c[3] + q_c[1] * q_c[2]), 1 - 2 * (q_c[2] ** 2 + q_c[3] ** 2)
+        )
+
         if self.target_state is not None:
             pos_error = float(np.linalg.norm(current_state[:2] - self.target_state[:2]))
-            ang_error = abs(
-                self.angle_difference(self.target_state[4], current_state[4])
+
+            # Recalculate target angle for error
+            q_t = self.target_state[3:7]
+            targ_yaw = np.arctan2(
+                2 * (q_t[0] * q_t[3] + q_t[1] * q_t[2]), 1 - 2 * (q_t[2] ** 2 + q_t[3] ** 2)
             )
+
+            ang_error = abs(self.angle_difference(targ_yaw, curr_yaw))
         else:
             pos_error = 0.0
             ang_error = 0.0
@@ -297,9 +308,7 @@ class SimulationVisualizationManager:
                 self.satellite.ax_main.add_patch(obstacle_circle)
 
                 # Draw safety zone as red dashed circle
-                safety_radius = (
-                    obs_radius + self.SatelliteConfig.OBSTACLE_AVOIDANCE_SAFETY_MARGIN
-                )
+                safety_radius = obs_radius + self.SatelliteConfig.OBSTACLE_AVOIDANCE_SAFETY_MARGIN
                 safety_circle = patches.Circle(
                     (obs_x, obs_y),
                     safety_radius,
@@ -428,9 +437,7 @@ class SimulationVisualizationManager:
             ]
         )
 
-        rotated_corners = np.array(
-            [rotation_matrix @ corner for corner in square_corners]
-        )
+        rotated_corners = np.array([rotation_matrix @ corner for corner in square_corners])
         translated_corners = rotated_corners + self.satellite.position
 
         satellite_patch = patches.Polygon(
@@ -477,17 +484,26 @@ class SimulationVisualizationManager:
         current_state = self.get_current_state()
         net_force, net_torque = self.satellite.calculate_forces_and_torques()
 
+        # Extract 2D/3D components
+        curr_x, curr_y = current_state[0], current_state[1]
+        q_c = current_state[3:7]
+        curr_yaw = np.arctan2(
+            2 * (q_c[0] * q_c[3] + q_c[1] * q_c[2]), 1 - 2 * (q_c[2] ** 2 + q_c[3] ** 2)
+        )
+
         # Calculate errors
         if self.target_state is not None:
-            pos_error = float(np.linalg.norm(current_state[:2] - self.target_state[:2]))
-            angle_error = abs(
-                np.degrees(
-                    self.angle_difference(self.target_state[4], current_state[4])
-                )
+            targ_x, targ_y = self.target_state[0], self.target_state[1]
+            q_t = self.target_state[3:7]
+            targ_yaw = np.arctan2(
+                2 * (q_t[0] * q_t[3] + q_t[1] * q_t[2]), 1 - 2 * (q_t[2] ** 2 + q_t[3] ** 2)
             )
-            target_x_str = f"X: {self.target_state[0]:.3f} m"
-            target_y_str = f"Y: {self.target_state[1]:.3f} m"
-            target_yaw_str = f"Yaw: {np.degrees(self.target_state[4]):.1f}°"
+
+            pos_error = float(np.linalg.norm(current_state[:2] - self.target_state[:2]))
+            angle_error = abs(np.degrees(self.angle_difference(targ_yaw, curr_yaw)))
+            target_x_str = f"X: {targ_x:.3f} m"
+            target_y_str = f"Y: {targ_y:.3f} m"
+            target_yaw_str = f"Yaw: {np.degrees(targ_yaw):.1f}°"
         else:
             pos_error = 0.0
             angle_error = 0.0
@@ -497,9 +513,7 @@ class SimulationVisualizationManager:
 
         # Get active thrusters
         active_thrusters = (
-            list(sorted(self.satellite.active_thrusters))
-            if self.satellite.active_thrusters
-            else []
+            list(sorted(self.satellite.active_thrusters)) if self.satellite.active_thrusters else []
         )
 
         mpc_time = self.mpc_solve_times[-1] if self.mpc_solve_times else 0.0
@@ -517,9 +531,9 @@ class SimulationVisualizationManager:
             f"Time: {self.simulation_time:.1f}s",
             "",
             "CURRENT STATE:",
-            f"X: {current_state[0]:.3f} m",
-            f"Y: {current_state[1]:.3f} m",
-            f"Yaw: {np.degrees(current_state[4]):.1f}°",
+            f"X: {curr_x:.3f} m",
+            f"Y: {curr_y:.3f} m",
+            f"Yaw: {np.degrees(curr_yaw):.1f}°",
             "",
             "TARGET STATE:",
             target_x_str,
@@ -578,12 +592,19 @@ class SimulationVisualizationManager:
         # Print brief success message
         final_state = self.get_current_state()
         if self.target_state is not None:
-            pos_error_final = float(
-                np.linalg.norm(final_state[:2] - self.target_state[:2])
+            pos_error_final = float(np.linalg.norm(final_state[:2] - self.target_state[:2]))
+
+            q_c = final_state[3:7]
+            curr_yaw = np.arctan2(
+                2 * (q_c[0] * q_c[3] + q_c[1] * q_c[2]), 1 - 2 * (q_c[2] ** 2 + q_c[3] ** 2)
             )
-            ang_error_final = abs(
-                self.angle_difference(self.target_state[4], final_state[4])
+
+            q_t = self.target_state[3:7]
+            targ_yaw = np.arctan2(
+                2 * (q_t[0] * q_t[3] + q_t[1] * q_t[2]), 1 - 2 * (q_t[2] ** 2 + q_t[3] ** 2)
             )
+
+            ang_error_final = abs(self.angle_difference(targ_yaw, curr_yaw))
         else:
             pos_error_final = 0.0
             ang_error_final = 0.0
@@ -645,9 +666,7 @@ class SimulationVisualizationManager:
         # Reset trajectory
         self.satellite.trajectory = [self.satellite.position.copy()]
 
-    def save_mujoco_video(
-        self, output_dir: Path, width: int = 1920, height: int = 1072
-    ) -> None:
+    def save_mujoco_video(self, output_dir: Path, width: int = 1920, height: int = 1072) -> None:
         """
         Render a MuJoCo 3D animation from recorded data (CSV) to MP4.
 
@@ -757,9 +776,7 @@ class SimulationVisualizationManager:
                                             8: [1, 0.8, 0, 0.3],
                                         }
                                         self.satellite.model.site_rgba[site_id] = (
-                                            original_colors.get(
-                                                thruster_idx, [0.5, 0.5, 0.5, 0.3]
-                                            )
+                                            original_colors.get(thruster_idx, [0.5, 0.5, 0.5, 0.3])
                                         )
                         except Exception:
                             pass
@@ -778,9 +795,7 @@ class SimulationVisualizationManager:
         This replaces the need for a separate visualization script.
         """
         if UnifiedVisualizationGenerator is None:
-            print(
-                "  Visualization components not available. Skipping auto-visualization."
-            )
+            print("  Visualization components not available. Skipping auto-visualization.")
             return
 
         if self.data_save_path is None:

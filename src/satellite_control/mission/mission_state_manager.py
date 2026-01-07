@@ -100,6 +100,33 @@ class MissionStateManager:
         self.spline_cruise_speed: float = 0.12  # m/s along spline
         self._active_obstacle: Optional[Tuple[float, float, float]] = None
 
+    def _create_3d_state(
+        self,
+        x: float,
+        y: float,
+        angle: float,
+        vx: float = 0.0,
+        vy: float = 0.0,
+        omega: float = 0.0,
+    ) -> np.ndarray:
+        """Helper to create 13-element 3D state from 2D params."""
+        state = np.zeros(13)
+        state[0] = x
+        state[1] = y
+        state[2] = 0.0
+
+        # Orient (Z-rot)
+        half = angle / 2.0
+        state[3] = np.cos(half)  # w
+        state[6] = np.sin(half)  # z
+
+        state[7] = vx
+        state[8] = vy
+        state[9] = 0.0
+
+        state[12] = omega
+        return state
+
     def get_trajectory(
         self,
         current_time: float,
@@ -115,45 +142,34 @@ class MissionStateManager:
             current_time: Current simulation time
             dt: Control timestep seconds
             horizon: Number of steps to predict (N)
-            current_state: Current satellite state [x, y, vx, vy, theta, omega]
-            external_target_state: Optional manual target [x, y, vx, vy, theta, omega]
-                                 Used if no active mission mode overrides it.
+            current_state: Current satellite state [pos(3), quat(4), vel(3), w(3)]
+            external_target_state: Optional manual target 13-element array
 
         Returns:
-            trajectory: Numpy array of shape (horizon+1, 6) with states
-                      [x, y, vx, vy, theta, omega] for steps k=0 to N.
+            trajectory: Numpy array of shape (horizon+1, 13)
         """
         # Initialize trajectory array
-        trajectory = np.zeros((horizon + 1, 6))
+        trajectory = np.zeros((horizon + 1, 13))
 
-        # Get current instantaneous target to start/fallback
-        # We use a mutable time tracker to simulate future evolution
-        _ = current_time  # sim_time used conceptually
+        # Extract 2D state components from 3D state
+        # Yaw from Quat [w, x, y, z] at indices 3:7
+        q = current_state[3:7]
+        # yaw = atan2(2(wz + xy), 1 - 2(y^2 + z^2))
+        curr_yaw = np.arctan2(2 * (q[0] * q[3] + q[1] * q[2]), 1 - 2 * (q[2] ** 2 + q[3] ** 2))
 
         # Determine active mode
         is_dxf = (
             hasattr(SatelliteConfig, "DXF_SHAPE_MODE_ACTIVE")
             and SatelliteConfig.DXF_SHAPE_MODE_ACTIVE
         )
-        _ = (
-            hasattr(SatelliteConfig, "ENABLE_WAYPOINT_MODE")
-            and SatelliteConfig.ENABLE_WAYPOINT_MODE
-        )  # is_waypoint - used for mode documentation
 
-        # For prediction, we need to simulate the "mission logic" forward in
-        # time without side effects.
-        # This is complex because MissionStateManager stores internal state.
-        # APPROACH:
-        # 1. For Waypoint Mode: Target remains constant for horizon.
-        # 2. For Shape Mode: Calculate exact future path positions!
+        # 3D Position for internal logic
+        curr_pos_3d = current_state[:3]
 
         if is_dxf:
             # --- SHAPE FOLLOWING PREDICTION ---
             path: List[Tuple[float, float]] = SatelliteConfig.DXF_SHAPE_PATH
             phase = getattr(SatelliteConfig, "DXF_SHAPE_PHASE", "POSITIONING")
-
-            # If in TRACKING phase, we can predict movement along path
-            # If in TRACKING phase, we can predict movement along path
             start_time = getattr(SatelliteConfig, "DXF_TRACKING_START_TIME", None)
 
             if phase == "TRACKING" and start_time is not None:
@@ -171,8 +187,6 @@ class MissionStateManager:
                     distance = speed * tracking_time
 
                     if distance >= path_len:
-                        # Reached end - stabilize at final pos
-                        # (Ideally we'd switch to end pos, here we just clamp to end)
                         current_path_position, _ = get_position_on_path(
                             path,
                             path_len,
@@ -183,16 +197,10 @@ class MissionStateManager:
                             path_len,
                             SatelliteConfig.DXF_CLOSEST_POINT_INDEX,
                         )
-                        trajectory[k] = [
-                            current_path_position[0],
-                            current_path_position[1],
-                            0,
-                            0,
-                            target_orientation,
-                            0,
-                        ]
+                        trajectory[k] = self._create_3d_state(
+                            current_path_position[0], current_path_position[1], target_orientation
+                        )
                     else:
-                        # Moving along path
                         wrapped_s = distance % path_len
                         pos, _ = get_position_on_path(
                             path,
@@ -204,75 +212,50 @@ class MissionStateManager:
                             wrapped_s,
                             SatelliteConfig.DXF_CLOSEST_POINT_INDEX,
                         )
-
-                        # Calculate velocity vector from orientation and speed
                         vx = speed * np.cos(orient)
                         vy = speed * np.sin(orient)
-
-                        trajectory[k] = [pos[0], pos[1], vx, vy, orient, 0]
+                        trajectory[k] = self._create_3d_state(pos[0], pos[1], orient, vx, vy)
             else:
-                # Non-tracking phase (Positioning/Stabilizing) -> Constant Target
-                # Get single target and fill horizon
                 target = self.update_target_state(
-                    current_state[:2],
-                    current_state[4],
-                    current_time,
-                    current_state,
+                    curr_pos_3d, curr_yaw, current_time, current_state
                 )
                 if target is not None:
                     trajectory[:] = target
                 elif external_target_state is not None:
-                    # Fallback to external target if mission returns None
                     trajectory[:] = external_target_state
                 else:
-                    # Fallback: hold current state with zero velocity
                     trajectory[:] = current_state
-                    trajectory[:, 2:] = 0  # Zero velocity hold
+                    trajectory[:, 7:] = 0  # Zero velocities
 
         else:
-            # --- STANDARD WAYPOINT / POINT-TO-POINT ---
-            # Assume constant target for now.
-            # TODO: Add logic to switch to next waypoint if we are close to current one?
-            # That complicates things as it changes the mission state logic.
-            # For "Standard" MPC, static target is fine.
+            # --- STANDARD WAYPOINT ---
+            target = self.update_target_state(curr_pos_3d, curr_yaw, current_time, current_state)
 
-            target = self.update_target_state(
-                current_state[:2],
-                current_state[4],
-                current_time,
-                current_state,
-            )
             if target is not None:
                 trajectory[:] = target
 
                 # Obstacle Avoidance Spline Prediction
                 if self.avoidance_spline is not None:
-                    # If avoiding obstacle, predict spline progression
                     progress = self.spline_arc_progress
                     speed = self.spline_cruise_speed
 
                     for k in range(horizon + 1):
-                        # Estimate future progress
                         future_progress = progress + (k * dt * speed)
 
                         if self.avoidance_spline.is_complete(future_progress):
-                            # Past spline -> Go to final target
-                            trajectory[k] = target  # The final target
+                            trajectory[k] = target
                         else:
-                            # On spline
                             s_pos = self.avoidance_spline.evaluate(future_progress)
                             s_tan = self.avoidance_spline.tangent(future_progress)
                             vx = s_tan[0] * speed
                             vy = s_tan[1] * speed
-                            trajectory[k] = [s_pos[0], s_pos[1], vx, vy, 0, 0]
+                            trajectory[k] = self._create_3d_state(s_pos[0], s_pos[1], 0.0, vx, vy)
 
             elif external_target_state is not None:
-                # Use external target (Point-to-Point mode)
                 trajectory[:] = external_target_state
             else:
-                # Default fallback: Hold Current
                 trajectory[:] = current_state
-                trajectory[:, 2:] = 0
+                trajectory[:, 7:] = 0
 
         return trajectory
 
@@ -371,18 +354,14 @@ class MissionStateManager:
             hasattr(SatelliteConfig, "ENABLE_WAYPOINT_MODE")
             and SatelliteConfig.ENABLE_WAYPOINT_MODE
         ):
-            return self._handle_multi_point_mode(
-                current_position, current_angle, current_time
-            )
+            return self._handle_multi_point_mode(current_position, current_angle, current_time)
 
         # DXF shape mode
         elif (
             hasattr(SatelliteConfig, "DXF_SHAPE_MODE_ACTIVE")
             and SatelliteConfig.DXF_SHAPE_MODE_ACTIVE
         ):
-            return self._handle_dxf_shape_mode(
-                current_position, current_angle, current_time
-            )
+            return self._handle_dxf_shape_mode(current_position, current_angle, current_time)
 
         # Point-to-point mode (no-op, handled by caller)
         return None
@@ -394,9 +373,7 @@ class MissionStateManager:
         current_time: float,
     ) -> Optional[np.ndarray]:
         """Handle waypoint sequential navigation mode."""
-        final_target_pos, final_target_angle = (
-            SatelliteConfig.get_current_waypoint_target()
-        )
+        final_target_pos, final_target_angle = SatelliteConfig.get_current_waypoint_target()
         if final_target_pos is None:
             return None
 
@@ -442,9 +419,7 @@ class MissionStateManager:
             # If we have an active spline, track along it
             if self.avoidance_spline is not None:
                 # Check if we now have a clear path to final target
-                clear_path = self._has_clear_path_to_target(
-                    current_position, final_target_pos
-                )
+                clear_path = self._has_clear_path_to_target(current_position, final_target_pos)
 
                 if clear_path:
                     # Exit spline early - we have clear line of sight
@@ -469,29 +444,18 @@ class MissionStateManager:
                         using_spline = False
                     else:
                         # Get moving reference point on spline
-                        target_pos = self.avoidance_spline.evaluate(
-                            self.spline_arc_progress
-                        )
+                        target_pos = self.avoidance_spline.evaluate(self.spline_arc_progress)
 
                         # Get tangent for velocity direction
-                        tangent = self.avoidance_spline.tangent(
-                            self.spline_arc_progress
-                        )
+                        tangent = self.avoidance_spline.tangent(self.spline_arc_progress)
                         target_vx = tangent[0] * self.spline_cruise_speed
                         target_vy = tangent[1] * self.spline_cruise_speed
 
                         # Keep neutral angle during spline traversal
                         target_angle = 0.0
 
-        target_state = np.array(
-            [
-                target_pos[0],
-                target_pos[1],
-                target_vx,
-                target_vy,
-                target_angle,
-                0.0,
-            ]
+        target_state = self._create_3d_state(
+            target_pos[0], target_pos[1], target_angle, target_vx, target_vy, 0.0
         )
 
         pos_error = np.linalg.norm(current_position - np.array(target_pos))
@@ -509,8 +473,7 @@ class MissionStateManager:
             if self.multi_point_target_reached_time is None:
                 self.multi_point_target_reached_time = current_time
                 logger.info(
-                    f" TARGET {SatelliteConfig.CURRENT_TARGET_INDEX + 1} "
-                    "REACHED! Stabilizing..."
+                    f" TARGET {SatelliteConfig.CURRENT_TARGET_INDEX + 1} " "REACHED! Stabilizing..."
                 )
             else:
                 is_final_target = (
@@ -519,13 +482,9 @@ class MissionStateManager:
                 )
 
                 if is_final_target:
-                    required_hold_time = (
-                        SatelliteConfig.WAYPOINT_FINAL_STABILIZATION_TIME
-                    )
+                    required_hold_time = SatelliteConfig.WAYPOINT_FINAL_STABILIZATION_TIME
                 else:
-                    required_hold_time = getattr(
-                        SatelliteConfig, "TARGET_HOLD_TIME", 3.0
-                    )
+                    required_hold_time = getattr(SatelliteConfig, "TARGET_HOLD_TIME", 3.0)
 
                 maintenance_time = current_time - self.multi_point_target_reached_time
                 if maintenance_time >= required_hold_time:
@@ -540,8 +499,7 @@ class MissionStateManager:
                         px, py = new_target_pos[0], new_target_pos[1]
                         ang = np.degrees(new_target_angle)
                         logger.info(
-                            f" MOVING TO NEXT TARGET {idx}: "
-                            f"({px:.2f}, {py:.2f}) m, {ang:.1f}°"
+                            f" MOVING TO NEXT TARGET {idx}: " f"({px:.2f}, {py:.2f}) m, {ang:.1f}°"
                         )
                         self.multi_point_target_reached_time = None
                         # Reset obstacle path for next target (will happen
@@ -549,9 +507,7 @@ class MissionStateManager:
                     else:
                         # All targets completed
                         SatelliteConfig.MULTI_POINT_PHASE = "COMPLETE"
-                        logger.info(
-                            " ALL WAYPOINTS REACHED! Final stabilization phase."
-                        )
+                        logger.info(" ALL WAYPOINTS REACHED! Final stabilization phase.")
                         return None  # Signal mission complete
         else:
             self.multi_point_target_reached_time = None
@@ -608,9 +564,7 @@ class MissionStateManager:
 
             logger.info(f" PROFILE FOLLOWING MISSION STARTED at t={current_time:.2f}s")
             cx, cy = closest_point[0], closest_point[1]
-            logger.info(
-                f"   Phase 1: Moving to closest point on path " f"({cx:.3f}, {cy:.3f})"
-            )
+            logger.info(f"   Phase 1: Moving to closest point on path " f"({cx:.3f}, {cy:.3f})")
             logger.info(f" Profile path length: {total_length:.3f} m")
 
         dxf_path: List[Tuple[float, float]] = SatelliteConfig.DXF_SHAPE_PATH
@@ -638,9 +592,7 @@ class MissionStateManager:
 
         # Phase 5: RETURNING
         elif phase == "RETURNING":
-            return self._dxf_returning_phase(
-                current_position, current_angle, current_time
-            )
+            return self._dxf_returning_phase(current_position, current_angle, current_time)
 
         return None
 
@@ -667,8 +619,8 @@ class MissionStateManager:
             path, 0.0, SatelliteConfig.DXF_CLOSEST_POINT_INDEX
         )
 
-        target_state = np.array(
-            [target_pos[0], target_pos[1], 0.0, 0.0, target_orientation, 0.0]
+        target_state = self._create_3d_state(
+            target_pos[0], target_pos[1], target_orientation, 0.0, 0.0, 0.0
         )
 
         pos_error = np.linalg.norm(current_position - np.array(target_pos))
@@ -685,17 +637,12 @@ class MissionStateManager:
                 )
             else:
                 stabilization_time = current_time - self.shape_stabilization_start_time
-                if (
-                    stabilization_time
-                    >= SatelliteConfig.SHAPE_POSITIONING_STABILIZATION_TIME
-                ):
+                if stabilization_time >= SatelliteConfig.SHAPE_POSITIONING_STABILIZATION_TIME:
                     SatelliteConfig.DXF_SHAPE_PHASE = "TRACKING"
                     SatelliteConfig.DXF_TRACKING_START_TIME = current_time  # type: ignore
                     SatelliteConfig.DXF_TARGET_START_DISTANCE = 0.0
                     logger.info(" Satellite stable! Starting profile tracking...")
-                    logger.info(
-                        f"   Target speed: {SatelliteConfig.DXF_TARGET_SPEED:.2f} m/s"
-                    )
+                    logger.info(f"   Target speed: {SatelliteConfig.DXF_TARGET_SPEED:.2f} m/s")
         else:
             self.shape_stabilization_start_time = None
 
@@ -735,9 +682,7 @@ class MissionStateManager:
                         "DXF_PATH_STABILIZATION_START_TIME",
                         current_time,
                     )
-                    setattr(
-                        SatelliteConfig, "DXF_FINAL_POSITION", current_path_position
-                    )
+                    setattr(SatelliteConfig, "DXF_FINAL_POSITION", current_path_position)
                     stab_time = SatelliteConfig.SHAPE_POSITIONING_STABILIZATION_TIME
                     logger.info(
                         f" Stabilizing at final waypoint for {stab_time:.1f} "
@@ -750,9 +695,7 @@ class MissionStateManager:
                 setattr(SatelliteConfig, "DXF_STABILIZATION_START_TIME", current_time)
                 SatelliteConfig.DXF_SHAPE_PHASE = "STABILIZING"
                 setattr(SatelliteConfig, "DXF_FINAL_POSITION", current_path_position)
-                logger.info(
-                    " Profile traversal completed! Stabilizing at final position..."
-                )
+                logger.info(" Profile traversal completed! Stabilizing at final position...")
                 return None
         else:
             # Continue tracking
@@ -766,15 +709,13 @@ class MissionStateManager:
                 path, wrapped_s, SatelliteConfig.DXF_CLOSEST_POINT_INDEX
             )
 
-            return np.array(
-                [
-                    current_path_position[0],
-                    current_path_position[1],
-                    0.0,
-                    0.0,
-                    target_orientation,
-                    0.0,
-                ]
+            return self._create_3d_state(
+                current_path_position[0],
+                current_path_position[1],
+                target_orientation,
+                0.0,
+                0.0,
+                0.0,
             )
 
     def _dxf_path_stabilization_phase(
@@ -812,8 +753,8 @@ class MissionStateManager:
         if target_pos is None:
             return None
 
-        target_state = np.array(
-            [target_pos[0], target_pos[1], 0.0, 0.0, target_orientation, 0.0]
+        target_state = self._create_3d_state(
+            target_pos[0], target_pos[1], target_orientation, 0.0, 0.0, 0.0
         )
 
         pos_error = float(np.linalg.norm(current_position - np.array(target_pos)))
@@ -830,24 +771,15 @@ class MissionStateManager:
                         "before return..."
                     )
                 else:
-                    stabilization_time = (
-                        current_time - self.final_waypoint_stabilization_start_time
-                    )
-                    if (
-                        stabilization_time
-                        >= SatelliteConfig.SHAPE_POSITIONING_STABILIZATION_TIME
-                    ):
+                    stabilization_time = current_time - self.final_waypoint_stabilization_start_time
+                    if stabilization_time >= SatelliteConfig.SHAPE_POSITIONING_STABILIZATION_TIME:
                         SatelliteConfig.DXF_SHAPE_PHASE = "RETURNING"
                         setattr(SatelliteConfig, "DXF_RETURN_START_TIME", current_time)
-                        return_pos = getattr(
-                            SatelliteConfig, "DXF_RETURN_POSITION", None
-                        )
+                        return_pos = getattr(SatelliteConfig, "DXF_RETURN_POSITION", None)
                         logger.info(" Path stabilization complete!")
                         if return_pos is not None:
                             rx, ry = return_pos[0], return_pos[1]
-                        logger.info(
-                            f" Starting return to position ({rx:.2f}, {ry:.2f}) m"
-                        )
+                        logger.info(f" Starting return to position ({rx:.2f}, {ry:.2f}) m")
                         self.final_waypoint_stabilization_start_time = None
                         return None
             else:
@@ -860,24 +792,13 @@ class MissionStateManager:
                         f"{stab_time:.1f} seconds before tracking..."
                     )
                 else:
-                    stabilization_time = (
-                        current_time - self.shape_stabilization_start_time
-                    )
-                    if (
-                        stabilization_time
-                        >= SatelliteConfig.SHAPE_POSITIONING_STABILIZATION_TIME
-                    ):
+                    stabilization_time = current_time - self.shape_stabilization_start_time
+                    if stabilization_time >= SatelliteConfig.SHAPE_POSITIONING_STABILIZATION_TIME:
                         SatelliteConfig.DXF_SHAPE_PHASE = "TRACKING"
-                        setattr(
-                            SatelliteConfig, "DXF_TRACKING_START_TIME", current_time
-                        )
+                        setattr(SatelliteConfig, "DXF_TRACKING_START_TIME", current_time)
                         SatelliteConfig.DXF_TARGET_START_DISTANCE = 0.0
-                        logger.info(
-                            " Path stabilization complete! Starting profile tracking..."
-                        )
-                        logger.info(
-                            f"   Target speed: {SatelliteConfig.DXF_TARGET_SPEED:.2f} m/s"
-                        )
+                        logger.info(" Path stabilization complete! Starting profile tracking...")
+                        logger.info(f"   Target speed: {SatelliteConfig.DXF_TARGET_SPEED:.2f} m/s")
                         self.shape_stabilization_start_time = None
         else:
             # Reset stabilization timer if satellite drifts away
@@ -913,9 +834,7 @@ class MissionStateManager:
 
         if at_return_position:
             # Stabilizing at return position - use return angle
-            target_orientation = (
-                getattr(SatelliteConfig, "DXF_RETURN_ANGLE", 0.0) or 0.0
-            )
+            target_orientation = getattr(SatelliteConfig, "DXF_RETURN_ANGLE", 0.0) or 0.0
         else:
             # Stabilizing at end of path - use path tangent
             end_s = getattr(SatelliteConfig, "DXF_PATH_LENGTH", 0.0)
@@ -923,8 +842,8 @@ class MissionStateManager:
                 path, end_s, SatelliteConfig.DXF_CLOSEST_POINT_INDEX
             )
 
-        target_state = np.array(
-            [final_pos[0], final_pos[1], 0.0, 0.0, target_orientation, 0.0]
+        target_state = self._create_3d_state(
+            final_pos[0], final_pos[1], target_orientation, 0.0, 0.0, 0.0
         )
 
         if SatelliteConfig.DXF_STABILIZATION_START_TIME is None:
@@ -950,8 +869,8 @@ class MissionStateManager:
         return_pos = getattr(SatelliteConfig, "DXF_RETURN_POSITION", (0.0, 0.0))
         return_angle = getattr(SatelliteConfig, "DXF_RETURN_ANGLE", 0.0) or 0.0
 
-        target_state = np.array(
-            [return_pos[0], return_pos[1], 0.0, 0.0, return_angle, 0.0]
+        target_state = self._create_3d_state(
+            return_pos[0], return_pos[1], return_angle, 0.0, 0.0, 0.0
         )
 
         pos_error = float(np.linalg.norm(current_position - np.array(return_pos)))
@@ -966,13 +885,10 @@ class MissionStateManager:
                 if self.return_stabilization_start_time is None:
                     self.return_stabilization_start_time = current_time
                     SatelliteConfig.DXF_SHAPE_PHASE = "STABILIZING"
-                    setattr(
-                        SatelliteConfig, "DXF_STABILIZATION_START_TIME", current_time
-                    )
+                    setattr(SatelliteConfig, "DXF_STABILIZATION_START_TIME", current_time)
                     setattr(SatelliteConfig, "DXF_FINAL_POSITION", return_pos)
                     logger.info(
-                        " Reached return position! "
-                        "Transitioning to final stabilization..."
+                        " Reached return position! " "Transitioning to final stabilization..."
                     )
                     return None  # Let next update handle STABILIZING phase
             else:

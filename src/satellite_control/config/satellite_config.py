@@ -52,27 +52,15 @@ from .models import AppConfig, MPCParams, SatellitePhysicalParams, SimulationPar
 def _create_default_config() -> AppConfig:
     """Create default configuration from legacy modules."""
 
-    # Select 2D or 3D physics based on mode
-    if physics.USE_3D_MODE:
-        com_offset = tuple(physics.COM_OFFSET_3D)
-        thruster_positions = physics.THRUSTER_POSITIONS_3D
-        thruster_directions = {k: tuple(v) for k, v in physics.THRUSTER_DIRECTIONS_3D.items()}
-        thruster_forces = physics.THRUSTER_FORCES_3D
-    else:
-        com_offset = tuple(physics.COM_OFFSET)
-        thruster_positions = physics.THRUSTER_POSITIONS
-        thruster_directions = {k: tuple(v) for k, v in physics.THRUSTER_DIRECTIONS.items()}
-        thruster_forces = physics.THRUSTER_FORCES
-
     # Physics
     phys = SatellitePhysicalParams(
         total_mass=physics.TOTAL_MASS,
         moment_of_inertia=physics.MOMENT_OF_INERTIA,
         satellite_size=physics.SATELLITE_SIZE,
-        com_offset=com_offset,
-        thruster_positions=thruster_positions,
-        thruster_directions=thruster_directions,
-        thruster_forces=thruster_forces,
+        com_offset=tuple(physics.COM_OFFSET),
+        thruster_positions=physics.THRUSTER_POSITIONS,
+        thruster_directions={k: tuple(v) for k, v in physics.THRUSTER_DIRECTIONS.items()},
+        thruster_forces=physics.THRUSTER_FORCES,
         use_realistic_physics=False,
         damping_linear=0.0,
         damping_angular=0.0,
@@ -227,26 +215,12 @@ class SatelliteConfig:
     TOTAL_MASS = physics.TOTAL_MASS
     SATELLITE_SIZE = physics.SATELLITE_SIZE
     MOMENT_OF_INERTIA = physics.MOMENT_OF_INERTIA
+    COM_OFFSET = physics.COM_OFFSET
     GRAVITY_M_S2 = physics.GRAVITY_M_S2
 
-    # 3D mode flag
-    USE_3D_MODE = physics.USE_3D_MODE
-
-    # Use 3D or 2D config based on mode
-    if USE_3D_MODE:
-        COM_OFFSET = physics.COM_OFFSET_3D
-        THRUSTER_POSITIONS = physics.THRUSTER_POSITIONS_3D
-        THRUSTER_DIRECTIONS = physics.THRUSTER_DIRECTIONS_3D
-        THRUSTER_FORCES = physics.THRUSTER_FORCES_3D
-        MOMENT_OF_INERTIA_TENSOR = physics.MOMENT_OF_INERTIA_TENSOR
-        NUM_THRUSTERS = 12
-    else:
-        COM_OFFSET = physics.COM_OFFSET
-        THRUSTER_POSITIONS = physics.THRUSTER_POSITIONS
-        THRUSTER_DIRECTIONS = physics.THRUSTER_DIRECTIONS
-        THRUSTER_FORCES = physics.THRUSTER_FORCES
-        MOMENT_OF_INERTIA_TENSOR = None
-        NUM_THRUSTERS = 8
+    THRUSTER_POSITIONS = physics.THRUSTER_POSITIONS
+    THRUSTER_DIRECTIONS = physics.THRUSTER_DIRECTIONS
+    THRUSTER_FORCES = physics.THRUSTER_FORCES
 
     # Realistic physics parameters
     USE_REALISTIC_PHYSICS = False
