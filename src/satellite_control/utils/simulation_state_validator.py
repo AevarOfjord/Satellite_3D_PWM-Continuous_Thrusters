@@ -90,7 +90,7 @@ class SimulationStateValidator:
         """
         Validate that state vector has correct format.
 
-        Expected format: [x, y, vx, vy, theta, omega]
+        Expected format: [x, y, z, qw, qx, qy, qz, vx, vy, vz, wx, wy, wz]
 
         Args:
             state: State vector to validate
@@ -104,8 +104,8 @@ class SimulationStateValidator:
         if not isinstance(state, np.ndarray):
             raise ValueError(f"State must be numpy array, got {type(state)}")
 
-        if state.shape != (6,):
-            raise ValueError(f"State must have shape (6,), got {state.shape}")
+        if state.shape != (13,):
+            raise ValueError(f"State must have shape (13,), got {state.shape}")
 
         if not np.all(np.isfinite(state)):
             raise ValueError(f"State contains non-finite values: {state}")
@@ -132,6 +132,12 @@ class SimulationStateValidator:
             return (
                 False,
                 f"Y position {position[1]:.3f} exceeds bounds ±{self.position_bounds}",
+            )
+
+        if len(position) > 2 and abs(position[2]) > self.position_bounds:
+            return (
+                False,
+                f"Z position {position[2]:.3f} exceeds bounds ±{self.position_bounds}",
             )
 
         return True, None
@@ -179,7 +185,7 @@ class SimulationStateValidator:
         Check all state bounds.
 
         Args:
-            state: State vector [x, y, vx, vy, theta, omega]
+            state: State vector [pos(3), quat(4), vel(3), w(3)]
 
         Returns:
             Tuple of (all_valid, list_of_errors)
@@ -187,17 +193,18 @@ class SimulationStateValidator:
         errors = []
 
         # Check position
-        pos_valid, pos_error = self.check_position_bounds(state[:2])
+        pos_valid, pos_error = self.check_position_bounds(state[:3])
         if not pos_valid:
             errors.append(pos_error)
 
         # Check velocity
-        vel_valid, vel_error = self.check_velocity_bounds(state[2:4])
+        vel_valid, vel_error = self.check_velocity_bounds(state[7:10])
         if not vel_valid:
             errors.append(vel_error)
 
-        # Check angular velocity
-        angvel_valid, angvel_error = self.check_angular_velocity_bounds(state[5])
+        # Check angular velocity (norm of vector)
+        ang_vel_mag = np.linalg.norm(state[10:13])
+        angvel_valid, angvel_error = self.check_angular_velocity_bounds(ang_vel_mag)
         if not angvel_valid:
             errors.append(angvel_error)
 
@@ -233,29 +240,34 @@ class SimulationStateValidator:
         Check if satellite has reached target within tolerances.
 
         Args:
-            current_state: Current state [x, y, vx, vy, theta, omega]
-            target_state: Target state [x, y, vx, vy, theta, omega]
+            current_state: Current state [pos(3), quat(4), vel(3), w(3)]
+            target_state: Target state [pos(3), quat(4), vel(3), w(3)]
 
         Returns:
             True if target reached within all tolerances
         """
-        # Position error
-        pos_error = np.linalg.norm(current_state[:2] - target_state[:2])
+        # Position error (3D)
+        pos_error = np.linalg.norm(current_state[:3] - target_state[:3])
         if pos_error >= self.position_tolerance:
             return False
 
-        # Velocity error
-        vel_error = np.linalg.norm(current_state[2:4] - target_state[2:4])
+        # Velocity error (3D)
+        vel_error = np.linalg.norm(current_state[7:10] - target_state[7:10])
         if vel_error >= self.velocity_tolerance:
             return False
 
-        # Angle error
-        ang_error = abs(self.angle_difference(target_state[4], current_state[4]))
+        # Angle error (Quaternion dot prod)
+        q1 = current_state[3:7]
+        q2 = target_state[3:7]
+        dot = np.abs(np.dot(q1, q2))
+        dot = min(1.0, max(-1.0, dot))
+        ang_error = 2.0 * np.arccos(dot)
+
         if ang_error >= self.angle_tolerance:
             return False
 
-        # Angular velocity error
-        angvel_error = abs(current_state[5] - target_state[5])
+        # Angular velocity error (3D)
+        angvel_error = np.linalg.norm(current_state[10:13] - target_state[10:13])
         if angvel_error >= self.angular_velocity_tolerance:
             return False
 
@@ -268,16 +280,23 @@ class SimulationStateValidator:
         Compute all state errors.
 
         Args:
-            current_state: Current state [x, y, vx, vy, theta, omega]
-            target_state: Target state [x, y, vx, vy, theta, omega]
+            current_state: Current state [pos(3), quat(4), vel(3), w(3)]
+            target_state: Target state [pos(3), quat(4), vel(3), w(3)]
 
         Returns:
             Dictionary with error values
         """
-        pos_error = np.linalg.norm(current_state[:2] - target_state[:2])
-        vel_error = np.linalg.norm(current_state[2:4] - target_state[2:4])
-        ang_error = abs(self.angle_difference(target_state[4], current_state[4]))
-        angvel_error = abs(current_state[5] - target_state[5])
+        pos_error = np.linalg.norm(current_state[:3] - target_state[:3])
+        vel_error = np.linalg.norm(current_state[7:10] - target_state[7:10])
+
+        q1 = current_state[3:7]
+        q2 = target_state[3:7]
+        # dot product ensures shortest path
+        dot = np.abs(np.dot(q1, q2))
+        dot = min(1.0, max(-1.0, dot))
+        ang_error = 2.0 * np.arccos(dot)
+
+        angvel_error = np.linalg.norm(current_state[10:13] - target_state[10:13])
 
         return {
             "position_error": float(pos_error),
@@ -286,8 +305,7 @@ class SimulationStateValidator:
             "angular_velocity_error": float(angvel_error),
             "position_error_x": float(current_state[0] - target_state[0]),
             "position_error_y": float(current_state[1] - target_state[1]),
-            "velocity_error_x": float(current_state[2] - target_state[2]),
-            "velocity_error_y": float(current_state[3] - target_state[3]),
+            "position_error_z": float(current_state[2] - target_state[2]),
         }
 
     def check_within_tolerances(
@@ -297,8 +315,8 @@ class SimulationStateValidator:
         Check which state components are within tolerance.
 
         Args:
-            current_state: Current state [x, y, vx, vy, theta, omega]
-            target_state: Target state [x, y, vx, vy, theta, omega]
+            current_state: Current state [pos(3), quat(4), vel(3), w(3)]
+            target_state: Target state [pos(3), quat(4), vel(3), w(3)]
 
         Returns:
             Dictionary indicating which components are within tolerance
@@ -323,7 +341,7 @@ class SimulationStateValidator:
         Models OptiTrack measurement uncertainty and velocity estimation errors.
 
         Args:
-            true_state: True state [x, y, vx, vy, theta, omega]
+            true_state: True state [pos(3), quat(4), vel(3), w(3)]
             use_realistic_physics: Override for USE_REALISTIC_PHYSICS config
 
         Returns:
@@ -340,16 +358,42 @@ class SimulationStateValidator:
         # Position noise (OptiTrack position uncertainty ~0.1-1mm)
         noisy_state[0] += np.random.normal(0, SatelliteConfig.POSITION_NOISE_STD)
         noisy_state[1] += np.random.normal(0, SatelliteConfig.POSITION_NOISE_STD)
+        noisy_state[2] += np.random.normal(0, SatelliteConfig.POSITION_NOISE_STD)
 
         # Velocity noise (from numerical differentiation + filtering)
-        noisy_state[2] += np.random.normal(0, SatelliteConfig.VELOCITY_NOISE_STD)
-        noisy_state[3] += np.random.normal(0, SatelliteConfig.VELOCITY_NOISE_STD)
+        # [7,8,9]
+        noisy_state[7] += np.random.normal(0, SatelliteConfig.VELOCITY_NOISE_STD)
+        noisy_state[8] += np.random.normal(0, SatelliteConfig.VELOCITY_NOISE_STD)
+        noisy_state[9] += np.random.normal(0, SatelliteConfig.VELOCITY_NOISE_STD)
 
-        # Angle noise (OptiTrack orientation uncertainty ~0.1-0.5°)
-        noisy_state[4] += np.random.normal(0, SatelliteConfig.ANGLE_NOISE_STD)
+        # Angle noise (Rotation about Z for now to match noise config)
+        # Apply small rotation perturbation
+        angle_noise = np.random.normal(0, SatelliteConfig.ANGLE_NOISE_STD)
+        half = angle_noise / 2.0
+        dq = np.array([np.cos(half), 0, 0, np.sin(half)])  # Z-rotation noise
+        # q_new = q_old * dq (approx) or dq * q_old
+        # Simplified: Just perturbs Z-component of orientation if predominantly planar?
+        # Better: full quaternion multiplication.
+        # But to be safe and simple, let's just add noise to Euler Z (Yaw) logic if we can.
+        # Since we don't have quat logic here easily, assume simple scalar update isn't enough.
+        # Skip complex noise or implement simple quat mult to avoid imports.
+        # Implementation of simple q_mult(dq, q):
+        # q = [w, x, y, z]
+        qw, qx, qy, qz = noisy_state[3], noisy_state[4], noisy_state[5], noisy_state[6]
+        dw, dx, dy, dz = dq[0], dq[1], dq[2], dq[3]
+        # Hamilton product
+        nw = dw * qw - dx * qx - dy * qy - dz * qz
+        nx = dw * qx + dx * qw + dy * qz - dz * qy
+        ny = dw * qy - dx * qz + dy * qw + dz * qx
+        nz = dw * qz + dx * qy - dy * qx + dz * qw
+        # Normalize
+        norm = np.sqrt(nw * nw + nx * nx + ny * ny + nz * nz)
+        noisy_state[3:7] = np.array([nw, nx, ny, nz]) / norm
 
-        # Angular velocity noise
-        noisy_state[5] += np.random.normal(0, SatelliteConfig.ANGULAR_VELOCITY_NOISE_STD)
+        # Angular velocity noise (10,11,12)
+        noisy_state[10] += np.random.normal(0, SatelliteConfig.ANGULAR_VELOCITY_NOISE_STD)
+        noisy_state[11] += np.random.normal(0, SatelliteConfig.ANGULAR_VELOCITY_NOISE_STD)
+        noisy_state[12] += np.random.normal(0, SatelliteConfig.ANGULAR_VELOCITY_NOISE_STD)
 
         return noisy_state
 
@@ -430,13 +474,13 @@ class SimulationStateValidator:
             if check_continuity and i > 0:
                 prev_state = state_history[i - 1]
 
-                # Position jump
-                pos_jump = np.linalg.norm(state[:2] - prev_state[:2])
+                # Position jump (3D)
+                pos_jump = np.linalg.norm(state[:3] - prev_state[:3])
                 if pos_jump > max_position_jump:
                     errors.append(f"Step {i}: Large position jump {pos_jump:.3f}m")
 
                 # Velocity jump
-                vel_jump = np.linalg.norm(state[2:4] - prev_state[2:4])
+                vel_jump = np.linalg.norm(state[7:10] - prev_state[7:10])
                 if vel_jump > max_velocity_jump:
                     errors.append(f"Step {i}: Large velocity jump {vel_jump:.3f}m/s")
 
@@ -498,8 +542,13 @@ if __name__ == "__main__":
     print(f"  Bounds: {validator.get_bounds_summary()}")
 
     # Test state validation
-    test_state = np.array([0.5, 0.5, 0.1, 0.1, np.pi / 4, 0.05])
-    target_state = np.array([0.0, 0.0, 0.0, 0.0, 0.0, 0.0])
+    test_state = np.zeros(13)
+    test_state[0:3] = np.array([0.5, 0.5, 0.0])
+    test_state[3:7] = np.array([1.0, 0.0, 0.0, 0.0])
+    test_state[7:10] = np.array([0.1, 0.1, 0.0])
+    test_state[10:13] = np.array([0.0, 0.0, 0.05])
+    target_state = np.zeros(13)
+    target_state[3:7] = np.array([1.0, 0.0, 0.0, 0.0])
 
     print("\nTest State Validation:")
     print(f"  State: {test_state}")

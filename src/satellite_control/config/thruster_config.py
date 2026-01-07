@@ -14,13 +14,13 @@ class ThrusterConfig:
     Configuration for a single thruster.
 
     Attributes:
-        position: (x, y) position relative to satellite center [m]
-        direction: (dx, dy) unit vector for thrust direction
+        position: (x, y, z) position relative to satellite center [m]
+        direction: (dx, dy, dz) unit vector for thrust direction
         force: Maximum thrust force [N]
     """
 
-    position: Tuple[float, float]
-    direction: Tuple[float, float]
+    position: Tuple[float, float, float]
+    direction: Tuple[float, float, float]
     force: float
 
     @property
@@ -37,22 +37,22 @@ class ThrusterConfig:
 
         return np.array(self.direction, dtype=np.float64)
 
-    def compute_torque(self, com_offset: Tuple[float, float] = (0.0, 0.0)):
+    def compute_torque(self, com_offset: Tuple[float, float, float] = (0.0, 0.0, 0.0)):
         """
         Compute torque about center of mass.
 
         Args:
-            com_offset: (x, y) offset of center of mass from geometric center
+            com_offset: (x, y, z) offset of center of mass from geometric center
 
         Returns:
-            Torque value (positive = CCW)
+            Torque vector (np.ndarray of shape (3,))
         """
         import numpy as np
 
         rel_pos = np.array(self.position) - np.array(com_offset)
         force_vec = self.force * np.array(self.direction)
-        # 2D cross product: r x F
-        return rel_pos[0] * force_vec[1] - rel_pos[1] * force_vec[0]
+        # 3D cross product: r x F
+        return np.cross(rel_pos, force_vec)
 
 
 @dataclass
@@ -69,16 +69,16 @@ class ThrusterArrayConfig:
     @classmethod
     def from_dicts(
         cls,
-        positions: Dict[int, Tuple[float, float]],
-        directions: Dict[int, Tuple[float, float]],
+        positions: Dict[int, Tuple[float, float, float]],
+        directions: Dict[int, Tuple[float, float, float]],
         forces: Dict[int, float],
     ) -> "ThrusterArrayConfig":
         """
         Create from legacy dictionary format.
 
         Args:
-            positions: {thruster_id: (x, y)} dictionary
-            directions: {thruster_id: (dx, dy)} dictionary
+            positions: {thruster_id: (x, y, z)} dictionary
+            directions: {thruster_id: (dx, dy, dz)} dictionary
             forces: {thruster_id: force} dictionary
 
         Returns:

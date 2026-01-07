@@ -51,6 +51,11 @@ class MissionReportGenerator:
         """
         self.config = config_obj
 
+    @staticmethod
+    def _format_euler_deg(angle: tuple[float, float, float]) -> str:
+        roll, pitch, yaw = np.degrees(angle)
+        return f"roll={roll:.1f}°, pitch={pitch:.1f}°, yaw={yaw:.1f}°"
+
     def generate_report(
         self,
         output_path: Path,
@@ -76,7 +81,7 @@ class MissionReportGenerator:
 
         Args:
             output_path: Path to save the report
-            state_history: List of state vectors [x, y, vx, vy, yaw, omega]
+            state_history: List of state vectors [x,y,z, qw,qx,qy,qz, vx,vy,vz, wx,wy,wz]
             target_state: Target state vector
             control_time: Total mission duration in seconds
             mpc_solve_times: List of MPC solve times
@@ -190,7 +195,12 @@ class MissionReportGenerator:
         f.write("STARTING CONFIGURATION:\n")
         f.write(f"  Starting X position:     {initial_state[0]:.3f} m\n")
         f.write(f"  Starting Y position:     {initial_state[1]:.3f} m\n")
-        f.write(f"  Starting orientation:    {np.degrees(initial_state[4]):.1f}°\n\n")
+        f.write(f"  Starting Z position:     {initial_state[2]:.3f} m\n")
+
+        # Extract Yaw
+        q = initial_state[3:7]
+        yaw = np.arctan2(2.0 * (q[0] * q[3] + q[1] * q[2]), 1.0 - 2.0 * (q[2] ** 2 + q[3] ** 2))
+        f.write(f"  Starting orientation:    {np.degrees(yaw):.1f}°\n\n")
 
         f.write("SHAPE CONFIGURATION:\n")
         if hasattr(self.config, "DXF_SHAPE_CENTER") and self.config.DXF_SHAPE_CENTER:
@@ -227,14 +237,22 @@ class MissionReportGenerator:
         f.write("STARTING CONFIGURATION:\n")
         f.write(f"  Starting X position:     {initial_state[0]:.3f} m\n")
         f.write(f"  Starting Y position:     {initial_state[1]:.3f} m\n")
-        f.write(f"  Starting orientation:    {np.degrees(initial_state[4]):.1f}°\n\n")
+        f.write(f"  Starting Z position:     {initial_state[2]:.3f} m\n")
+
+        q = initial_state[3:7]
+        yaw = np.arctan2(2.0 * (q[0] * q[3] + q[1] * q[2]), 1.0 - 2.0 * (q[2] ** 2 + q[3] ** 2))
+        f.write(f"  Starting orientation:    {np.degrees(yaw):.1f}°\n\n")
 
         f.write("WAYPOINTS:\n")
         f.write(f"  Number of Waypoints:     {len(self.config.WAYPOINT_TARGETS)}\n")
-        for i, ((tx, ty), ta) in enumerate(
+        for i, (target, angle) in enumerate(
             zip(self.config.WAYPOINT_TARGETS, self.config.WAYPOINT_ANGLES), 1
         ):
-            f.write(f"  Waypoint {i}:              ({tx:.3f}, {ty:.3f}) m, {np.degrees(ta):.1f}°\n")
+            tx, ty, tz = target
+            f.write(
+                f"  Waypoint {i}:              ({tx:.3f}, {ty:.3f}, {tz:.3f}) m, "
+                f"{self._format_euler_deg(angle)}\n"
+            )
         f.write(f"\n  Hold Time per Waypoint:  {self.config.TARGET_HOLD_TIME:.1f} s\n\n")
 
     def _write_point_to_point_config(
@@ -248,14 +266,22 @@ class MissionReportGenerator:
         f.write("STARTING CONFIGURATION:\n")
         f.write(f"  Starting X position:     {initial_state[0]:.3f} m\n")
         f.write(f"  Starting Y position:     {initial_state[1]:.3f} m\n")
-        f.write(f"  Starting orientation:    {np.degrees(initial_state[4]):.1f}°\n\n")
+        f.write(f"  Starting Z position:     {initial_state[2]:.3f} m\n")
 
-        target_pos = target_state[:2]
-        target_angle = target_state[4]
+        q = initial_state[3:7]
+        yaw = np.arctan2(2.0 * (q[0] * q[3] + q[1] * q[2]), 1.0 - 2.0 * (q[2] ** 2 + q[3] ** 2))
+        f.write(f"  Starting orientation:    {np.degrees(yaw):.1f}°\n\n")
+
+        target_pos = target_state[:3]
+        qt = target_state[3:7]
+        target_yaw = np.arctan2(
+            2.0 * (qt[0] * qt[3] + qt[1] * qt[2]), 1.0 - 2.0 * (qt[2] ** 2 + qt[3] ** 2)
+        )
         f.write("TARGET CONFIGURATION:\n")
         f.write(f"  Target X position:       {target_pos[0]:.3f} m\n")
         f.write(f"  Target Y position:       {target_pos[1]:.3f} m\n")
-        f.write(f"  Target orientation:      {np.degrees(target_angle):.1f}°\n\n")
+        f.write(f"  Target Z position:       {target_pos[2]:.3f} m\n")
+        f.write(f"  Target orientation:      {np.degrees(target_yaw):.1f}°\n\n")
 
     def _write_obstacle_configuration(self, f) -> None:
         """Write obstacle configuration."""
@@ -295,8 +321,7 @@ class MissionReportGenerator:
         f.write(f"  Velocity Weight (Q):     {self.config.Q_VELOCITY:.1f}\n")
         f.write(f"  Angle Weight (Q):        {self.config.Q_ANGLE:.1f}\n")
         f.write(f"  Angular Vel Weight (Q):  {self.config.Q_ANGULAR_VELOCITY:.1f}\n")
-        f.write(f"  Thrust Penalty (R):      {self.config.R_THRUST:.3f}\n")
-        f.write(f"  Switch Penalty (R):      {self.config.R_SWITCH:.3f}\n\n")
+        f.write(f"  Thrust Penalty (R):      {self.config.R_THRUST:.3f}\n\n")
 
         f.write("CONTROL CONSTRAINTS:\n")
         f.write("-" * 50 + "\n")
@@ -321,11 +346,15 @@ class MissionReportGenerator:
         f.write(f"  Total Mass:              {self.config.TOTAL_MASS:.3f} kg\n")
         f.write(f"  Moment of Inertia:       {self.config.MOMENT_OF_INERTIA:.6f} kg·m²\n")
         f.write(f"  Satellite Size:          {self.config.SATELLITE_SIZE:.3f} m\n")
-        com_x, com_y = self.config.COM_OFFSET[0], self.config.COM_OFFSET[1]
-        f.write(f"  COM Offset:              ({com_x:.6f}, {com_y:.6f}) m\n\n")
+        com_x, com_y, com_z = (
+            self.config.COM_OFFSET[0],
+            self.config.COM_OFFSET[1],
+            self.config.COM_OFFSET[2],
+        )
+        f.write(f"  COM Offset:              ({com_x:.6f}, {com_y:.6f}, {com_z:.6f}) m\n\n")
 
         f.write("THRUSTER FORCES:\n")
-        for tid in range(1, 9):
+        for tid in range(1, 13):
             f.write(f"  Thruster {tid}:             {self.config.THRUSTER_FORCES[tid]:.6f} N\n")
         f.write("\n")
 
@@ -348,7 +377,7 @@ class MissionReportGenerator:
         f.write(f"  Q_ANGLE:                       {self.config.Q_ANGLE:.1f}\n")
         f.write(f"  Q_ANGULAR_VELOCITY:            {self.config.Q_ANGULAR_VELOCITY:.1f}\n")
         f.write(f"  R_THRUST:                      {self.config.R_THRUST:.3f}\n")
-        f.write(f"  R_SWITCH:                      {self.config.R_SWITCH:.3f}\n")
+
         f.write(f"  MAX_VELOCITY:                  {self.config.MAX_VELOCITY:.3f} m/s\n")
         max_ang_vel = np.degrees(self.config.MAX_ANGULAR_VELOCITY)
         f.write(f"  MAX_ANGULAR_VELOCITY:          {max_ang_vel:.1f}°/s\n")
@@ -462,17 +491,25 @@ class MissionReportGenerator:
         # Calculate metrics
         initial_state = state_history[0]
         final_state = state_history[-1]
-        initial_pos = initial_state[:2]
-        final_pos = final_state[:2]
-        target_pos = target_state[:2]
+        initial_pos = initial_state[:3]
+        final_pos = final_state[:3]
+        target_pos = target_state[:3]
 
         pos_error_initial = np.linalg.norm(initial_pos - target_pos)
         pos_error_final = np.linalg.norm(final_pos - target_pos)
-        ang_error_initial = abs(angle_difference_func(target_state[4], initial_state[4]))
-        ang_error_final = abs(angle_difference_func(target_state[4], final_state[4]))
+
+        # 3D Angle Errors (Quaternion)
+        def get_ang_err(s1, s2):
+            q1, q2 = s1[3:7], s2[3:7]
+            dot = np.abs(np.dot(q1, q2))
+            dot = min(1.0, max(-1.0, dot))
+            return 2.0 * np.arccos(dot)
+
+        ang_error_initial = get_ang_err(initial_state, target_state)
+        ang_error_final = get_ang_err(final_state, target_state)
 
         trajectory_distance = sum(
-            np.linalg.norm(state_history[i][:2] - state_history[i - 1][:2])
+            np.linalg.norm(state_history[i][:3] - state_history[i - 1][:3])
             for i in range(1, len(state_history))
         )
 
@@ -490,21 +527,30 @@ class MissionReportGenerator:
             for i in range(1, len(control_history)):
                 curr_control = control_history[i]
                 prev_control = control_history[i - 1]
-                if len(curr_control) < 8:
-                    curr_control = np.pad(curr_control, (0, 8 - len(curr_control)), "constant")
-                if len(prev_control) < 8:
-                    prev_control = np.pad(prev_control, (0, 8 - len(prev_control)), "constant")
+                if len(curr_control) < 12:
+                    curr_control = np.pad(curr_control, (0, 12 - len(curr_control)), "constant")
+                if len(prev_control) < 12:
+                    prev_control = np.pad(prev_control, (0, 12 - len(prev_control)), "constant")
                 switching_events += np.sum(np.abs(curr_control - prev_control))
 
         success = check_target_reached_func()
-        vel_magnitude_final = np.linalg.norm(final_state[2:4])
+        vel_magnitude_final = np.linalg.norm(final_state[7:10])
 
         # Position & Trajectory Analysis
         f.write("[POSITION] POSITION & TRAJECTORY ANALYSIS\n")
         f.write("-" * 50 + "\n")
-        f.write(f"Initial Position:          ({initial_pos[0]:.3f}, {initial_pos[1]:.3f}) m\n")
-        f.write(f"Final Position:            ({final_pos[0]:.3f}, {final_pos[1]:.3f}) m\n")
-        f.write(f"Target Position:           ({target_pos[0]:.3f}, {target_pos[1]:.3f}) m\n")
+        f.write(
+            f"Initial Position:          ({initial_pos[0]:.3f}, {initial_pos[1]:.3f}, "
+            f"{initial_pos[2]:.3f}) m\n"
+        )
+        f.write(
+            f"Final Position:            ({final_pos[0]:.3f}, {final_pos[1]:.3f}, "
+            f"{final_pos[2]:.3f}) m\n"
+        )
+        f.write(
+            f"Target Position:           ({target_pos[0]:.3f}, {target_pos[1]:.3f}, "
+            f"{target_pos[2]:.3f}) m\n"
+        )
         f.write(f"Initial Position Error:    {pos_error_initial:.4f} m\n")
         f.write(f"Final Position Error:      {pos_error_final:.4f} m\n")
         if pos_error_initial > 0:
@@ -528,7 +574,10 @@ class MissionReportGenerator:
             ang_improv = (ang_error_initial - ang_error_final) / ang_error_initial * 100
             f.write(f"Angle Improvement:         {ang_improv:.1f}%\n")
         f.write(f"Final Velocity Magnitude:  {vel_magnitude_final:.4f} m/s\n")
-        f.write(f"Final Angular Velocity:    {np.degrees(final_state[5]):.2f}°/s\n\n")
+        f.write(
+            f"Final Angular Velocity:    {np.degrees(np.linalg.norm(final_state[10:13])):.2f}"
+            "°/s\n\n"
+        )
 
         # MPC Performance
         f.write("LINEARIZED MPC CONTROLLER PERFORMANCE\n")
@@ -550,7 +599,7 @@ class MissionReportGenerator:
             )
             n_times = len(mpc_convergence_times)
             pct = 100 * timing_violations / n_times
-            f.write(f"Timing Violations:         {timing_violations}/{n_times} " f"({pct:.1f}%)\n")
+            f.write(f"Timing Violations:         {timing_violations}/{n_times} ({pct:.1f}%)\n")
             rt_pct = np.mean(mpc_convergence_times) / control_update_interval
             f.write(f"Real-time Performance:     {rt_pct * 100:.1f}% of available time\n")
         f.write("\n")
@@ -566,7 +615,7 @@ class MissionReportGenerator:
             f.write(f"Thruster Switching Events:  {switching_events:.0f}\n")
             if len(control_history) > 0:
                 n_hist = len(control_history)
-                smoothness = (1 - switching_events / (n_hist * 8)) * 100
+                smoothness = (1 - switching_events / (n_hist * 12)) * 100
                 f.write(f"Control Smoothness:         {smoothness:.1f}%\n")
             if trajectory_distance > 0:
                 fuel_eff = total_thrust_magnitude / trajectory_distance

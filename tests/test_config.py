@@ -191,7 +191,11 @@ class TestSatelliteConfigMissionModes:
 
         try:
             targets = [(0.0, 0.0), (1.0, 0.0), (1.0, 1.0)]
-            angles = [0, np.pi / 2, np.pi]
+            angles = [
+                (0.0, 0.0, 0.0),
+                (0.0, 0.0, np.pi / 2),
+                (0.0, 0.0, np.pi),
+            ]
 
             SatelliteConfig.ENABLE_WAYPOINT_MODE = True
             SatelliteConfig.WAYPOINT_TARGETS = targets.copy()

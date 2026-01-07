@@ -37,7 +37,13 @@ class TestStateConverterProperties:
     @settings(max_examples=100)
     def test_state_vector_finite(self, x, y, theta, vx, vy, omega):
         """All state components should produce finite results in MPC."""
-        state = np.array([x, y, theta, vx, vy, omega])
+        from src.satellite_control.utils.orientation_utils import euler_xyz_to_quat_wxyz
+
+        state = np.zeros(13)
+        state[0:3] = np.array([x, y, 0.0])
+        state[3:7] = euler_xyz_to_quat_wxyz((0.0, 0.0, theta))
+        state[7:10] = np.array([vx, vy, 0.0])
+        state[10:13] = np.array([0.0, 0.0, omega])
 
         # State should be finite
         assert np.all(np.isfinite(state))

@@ -31,6 +31,8 @@ from cycler import cycler
 from matplotlib.axes import Axes
 from matplotlib.figure import Figure
 from matplotlib.patches import Circle
+from mpl_toolkits.mplot3d import Axes3D
+from mpl_toolkits.mplot3d.art3d import Poly3DCollection
 
 from src.satellite_control.config import SatelliteConfig
 
@@ -433,9 +435,9 @@ class UnifiedVisualizationGenerator:
                     # tracking. This matches the thruster_usage.png calculation.
                     has_valve_data = "Thruster_1_Val" in self.data.columns
                     if has_valve_data:
-                        # Sum valve states for all 8 thrusters at each timestep
+                        # Sum valve states for all 12 thrusters at each timestep
                         valve_sum_per_step = np.zeros(len(self.data))
-                        for i in range(8):
+                        for i in range(12):
                             col_name = f"Thruster_{i+1}_Val"
                             if col_name in self.data.columns:
                                 vals = self.data[col_name].values
@@ -636,7 +638,7 @@ class UnifiedVisualizationGenerator:
         try:
             # Handle None or empty
             if command_str is None or command_str == "":
-                return np.zeros(8)
+                return np.zeros(12)
 
             # Convert to string if not already
             command_str = str(command_str)
@@ -646,7 +648,7 @@ class UnifiedVisualizationGenerator:
             values = [float(x.strip()) for x in command_str.split(",")]
             return np.array(values)
         except Exception:
-            return np.zeros(8)
+            return np.zeros(12)
 
     def get_active_thrusters(self, command_vector: np.ndarray) -> list:
         """Get list of active thruster IDs from command vector.
@@ -665,13 +667,14 @@ class UnifiedVisualizationGenerator:
         self.fig = plt.figure(figsize=(16, 9))
         self.fig.suptitle(self.animation_title, fontsize=16)
 
-        self.ax_main = plt.subplot2grid((1, 3), (0, 0), colspan=2)
+        # 3D Main Axis
+        self.ax_main = self.fig.add_subplot(1, 3, (1, 2), projection="3d")
         self.ax_main.set_xlim(-3, 3)
         self.ax_main.set_ylim(-3, 3)
-        self.ax_main.set_aspect("equal")
-        self.ax_main.grid(True, alpha=0.3)
+        self.ax_main.set_zlim(-3, 3)
         self.ax_main.set_xlabel("X Position (m)")
         self.ax_main.set_ylabel("Y Position (m)")
+        self.ax_main.set_zlabel("Z Position (m)")
         self.ax_main.set_title(self.trajectory_title)
 
         self.ax_info = plt.subplot2grid((1, 3), (0, 2))
@@ -682,55 +685,85 @@ class UnifiedVisualizationGenerator:
 
         plt.tight_layout()
 
-    def draw_satellite(self, x: float, y: float, yaw: float, active_thrusters: list) -> None:
-        """Draw satellite at given position and orientation.
-
-        Args:
-            x, y: Satellite position
-            yaw: Satellite orientation (radians)
-            active_thrusters: List of active thruster IDs
-        """
+    def draw_satellite(
+        self, x: float, y: float, z: float, yaw: float, active_thrusters: list
+    ) -> None:
+        """Draw satellite at given position and orientation (3D)."""
         assert self.ax_main is not None, "ax_main must be initialized"
 
-        # Rotation matrix
+        # Rotation matrix (2D Yaw only for now, visualized in 3D)
         cos_yaw = np.cos(yaw)
         sin_yaw = np.sin(yaw)
-        rotation_matrix = np.array([[cos_yaw, -sin_yaw], [sin_yaw, cos_yaw]])
+        rotation_matrix = np.array([[cos_yaw, -sin_yaw, 0], [sin_yaw, cos_yaw, 0], [0, 0, 1]])
 
-        body_corners = np.array(
+        s = self.satellite_size / 2
+        # Define 3D cube corners relative to center
+        corners = np.array(
             [
-                [-self.satellite_size / 2, -self.satellite_size / 2],
-                [self.satellite_size / 2, -self.satellite_size / 2],
-                [self.satellite_size / 2, self.satellite_size / 2],
-                [-self.satellite_size / 2, self.satellite_size / 2],
-                [-self.satellite_size / 2, -self.satellite_size / 2],
+                [-s, -s, -s],
+                [s, -s, -s],
+                [s, s, -s],
+                [-s, s, -s],  # Bottom
+                [-s, -s, s],
+                [s, -s, s],
+                [s, s, s],
+                [-s, s, s],  # Top
             ]
         )
 
-        # Rotate and translate body
-        rotated_body = body_corners @ rotation_matrix.T + np.array([x, y])
-        self.ax_main.plot(
-            rotated_body[:, 0],
-            rotated_body[:, 1],
-            color=self.satellite_color,
-            linewidth=3,
-            label="Satellite",
-        )
+        # Rotate and translate
+        rotated_corners = corners @ rotation_matrix.T + np.array([x, y, z])
 
-        # Fill the satellite body
-        self.ax_main.fill(
-            rotated_body[:, 0],
-            rotated_body[:, 1],
-            color=self.satellite_color,
-            alpha=0.3,
-        )
+        # Define faces for Poly3DCollection
+        # Bottom, Top, Front, Back, Left, Right
+        faces = [
+            [
+                rotated_corners[0],
+                rotated_corners[1],
+                rotated_corners[2],
+                rotated_corners[3],
+            ],  # Bottom
+            [rotated_corners[4], rotated_corners[5], rotated_corners[6], rotated_corners[7]],  # Top
+            [
+                rotated_corners[0],
+                rotated_corners[1],
+                rotated_corners[5],
+                rotated_corners[4],
+            ],  # Front
+            [
+                rotated_corners[2],
+                rotated_corners[3],
+                rotated_corners[7],
+                rotated_corners[6],
+            ],  # Back
+            [
+                rotated_corners[1],
+                rotated_corners[2],
+                rotated_corners[6],
+                rotated_corners[5],
+            ],  # Right
+            [
+                rotated_corners[0],
+                rotated_corners[3],
+                rotated_corners[7],
+                rotated_corners[4],
+            ],  # Left
+        ]
+
+        # Draw Satellite Body
+        poly = Poly3DCollection(faces, alpha=0.5, edgecolor="black", linewidths=0.5)
+        poly.set_facecolor(self.satellite_color)
+        self.ax_main.add_collection3d(poly)
 
         # Draw thrusters
-        for thruster_id, (tx, ty) in self.thrusters.items():
+        for thruster_id, pos in self.thrusters.items():
+            tx, ty, tz = pos[0], pos[1], pos[2] if len(pos) > 2 else 0.0
+
             # Rotate thruster position
-            thruster_pos = np.array([tx, ty]) @ rotation_matrix.T
+            thruster_pos = np.array([tx, ty, tz]) @ rotation_matrix.T
             thruster_x = x + thruster_pos[0]
             thruster_y = y + thruster_pos[1]
+            thruster_z = z + thruster_pos[2]
 
             # Color and size based on activity
             if thruster_id in active_thrusters:
@@ -740,50 +773,43 @@ class UnifiedVisualizationGenerator:
                 alpha = 1.0
             else:
                 color = "gray"
-                size = 40
-                marker = "s"
-                alpha = 0.5
+                size = 20
+                marker = "o"
+                alpha = 0.3
 
             self.ax_main.scatter(
                 thruster_x,
                 thruster_y,
+                thruster_z,
                 c=color,
                 s=size,
                 marker=marker,
                 alpha=alpha,
                 edgecolors="black",
-                linewidth=1,
+                linewidth=0.5,
+                depthshade=True,
             )
 
-        # Draw orientation arrow
-        arrow_length = self.satellite_size * 0.8
+        # Draw orientation arrow (Forward X-axis)
+        arrow_length = self.satellite_size * 1.5
         arrow_end_x = x + arrow_length * cos_yaw
         arrow_end_y = y + arrow_length * sin_yaw
-        self.ax_main.arrow(
-            x,
-            y,
-            arrow_end_x - x,
-            arrow_end_y - y,
-            head_width=0.08,
-            head_length=0.08,
-            fc="green",
-            ec="green",
-            linewidth=2,
-            alpha=0.8,
+        arrow_end_z = z
+
+        self.ax_main.plot(
+            [x, arrow_end_x], [y, arrow_end_y], [z, arrow_end_z], color="green", linewidth=2
         )
 
-    def draw_target(self, target_x: float, target_y: float, target_yaw: float) -> None:
-        """Draw target position and orientation.
-
-        Args:
-            target_x, target_y: Target position
-            target_yaw: Target orientation (radians)
-        """
+    def draw_target(
+        self, target_x: float, target_y: float, target_z: float, target_yaw: float
+    ) -> None:
+        """Draw target position and orientation (3D)."""
         assert self.ax_main is not None, "ax_main must be initialized"
 
         self.ax_main.scatter(
             target_x,
             target_y,
+            target_z,
             c=self.target_color,
             s=200,
             marker="x",
@@ -791,46 +817,40 @@ class UnifiedVisualizationGenerator:
             label="Target",
         )
 
-        # Target circle
-        circle = Circle(
-            (target_x, target_y),
-            0.05,
-            color=self.target_color,
-            fill=False,
-            linewidth=2,
-            alpha=0.7,
-        )
-        self.ax_main.add_patch(circle)
+        # Target Sphere (wireframe visual)
+        # Simple point for now, maybe add small circle in XY plane at Z
+        # Matplotlib 3D doesn't support 'Circle' patch easily in 3D space, need plot_surface or plot(xs, ys, zs)
+        theta = np.linspace(0, 2 * np.pi, 20)
+        cx = target_x + 0.1 * np.cos(theta)
+        cy = target_y + 0.1 * np.sin(theta)
+        cz = np.full_like(cx, target_z)
+        self.ax_main.plot(cx, cy, cz, color=self.target_color, alpha=0.5, linestyle="--")
 
         # Target orientation arrow
         arrow_length = self.satellite_size * 0.6
         arrow_end_x = target_x + arrow_length * np.cos(target_yaw)
         arrow_end_y = target_y + arrow_length * np.sin(target_yaw)
-        self.ax_main.arrow(
-            target_x,
-            target_y,
-            arrow_end_x - target_x,
-            arrow_end_y - target_y,
-            head_width=0.06,
-            head_length=0.06,
-            fc=self.target_color,
-            ec=self.target_color,
+        arrow_end_z = target_z
+        self.ax_main.plot(
+            [target_x, arrow_end_x],
+            [target_y, arrow_end_y],
+            [target_z, arrow_end_z],
+            color=self.target_color,
             alpha=0.8,
             linewidth=2,
         )
 
-    def draw_trajectory(self, trajectory_x: list, trajectory_y: list) -> None:
-        """Draw satellite trajectory.
-
-        Args:
-            trajectory_x, trajectory_y: Lists of trajectory points
-        """
+    def draw_trajectory(self, trajectory_x: list, trajectory_y: list, trajectory_z: list) -> None:
+        """Draw satellite trajectory (3D)."""
         assert self.ax_main is not None, "ax_main must be initialized"
 
-        if len(trajectory_x) > 1:
+        # Ensure lengths match
+        min_len = min(len(trajectory_x), len(trajectory_y), len(trajectory_z))
+        if min_len > 1:
             self.ax_main.plot(
-                trajectory_x,
-                trajectory_y,
+                trajectory_x[:min_len],
+                trajectory_y[:min_len],
+                trajectory_z[:min_len],
                 color=self.trajectory_color,
                 linewidth=2,
                 alpha=0.8,
@@ -1063,11 +1083,7 @@ class UnifiedVisualizationGenerator:
             y_pos -= group_spacing
 
     def animate_frame(self, frame: int) -> List[Any]:
-        """Animation update function for each frame.
-
-        Args:
-            frame: Frame number
-        """
+        """Animation update function for each frame (3D)."""
         assert self.ax_main is not None, "ax_main must be initialized"
         assert self.dt is not None, "dt must be set"
 
@@ -1075,11 +1091,14 @@ class UnifiedVisualizationGenerator:
         self.ax_main.clear()
         self.ax_main.set_xlim(-3, 3)
         self.ax_main.set_ylim(-3, 3)
-        self.ax_main.set_aspect("equal")
-        self.ax_main.grid(True, alpha=0.3)
-        self.ax_main.set_xlabel("X Position (m)")
-        self.ax_main.set_ylabel("Y Position (m)")
+        self.ax_main.set_zlim(-3, 3)
+        self.ax_main.set_xlabel("X (m)")
+        self.ax_main.set_ylabel("Y (m)")
+        self.ax_main.set_zlabel("Z (m)")
         self.ax_main.set_title(self.frame_title_template.format(frame))
+
+        # Consistent viewing angle
+        self.ax_main.view_init(elev=30.0, azim=45)
 
         # Get current data
         step = min(int(frame * self.speedup_factor), self._get_len() - 1)
@@ -1089,39 +1108,44 @@ class UnifiedVisualizationGenerator:
         command_vector = self.parse_command_vector(current_data["Command_Vector"])
         active_thrusters = self.get_active_thrusters(command_vector)
 
-        # Type-safe extraction with float conversion
-        target_x_val = current_data["Target_X"]
-        target_x = float(target_x_val) if target_x_val is not None else 0.0
-        target_y_val = current_data["Target_Y"]
-        target_y = float(target_y_val) if target_y_val is not None else 0.0
-        target_yaw_val = current_data["Target_Yaw"]
-        target_yaw = float(target_yaw_val) if target_yaw_val is not None else 0.0
+        # Type-safe extraction
+        target_x = float(current_data.get("Target_X", 0.0) or 0.0)
+        target_y = float(current_data.get("Target_Y", 0.0) or 0.0)
+        target_z = float(
+            current_data.get("Target_Z", 0.0) or 0.0
+        )  # Assume Target_Z exists or default 0
+        target_yaw = float(current_data.get("Target_Yaw", 0.0) or 0.0)
 
-        self.draw_target(target_x, target_y, target_yaw)
+        self.draw_target(target_x, target_y, target_z, target_yaw)
 
-        # Draw DXF shape if mode is active OR if overlay_dxf option is enabled
-        if getattr(SatelliteConfig, "DXF_SHAPE_MODE_ACTIVE", False) or self.overlay_dxf:
-            self.draw_dxf_shape_overlays()
+        # Draw DXF if needed (ignored for now in 3D to keep simple, or project to Z=0)
+        # if getattr(SatelliteConfig, "DXF_SHAPE_MODE_ACTIVE", False) or self.overlay_dxf:
+        #    self.draw_dxf_shape_overlays()
 
-        # Draw trajectory up to current point
-        trajectory_x = self._col("Current_X")[: step + 1].tolist()
-        trajectory_y = self._col("Current_Y")[: step + 1].tolist()
-        self.draw_trajectory(trajectory_x, trajectory_y)
+        # Draw trajectory
+        traj_x = self._col("Current_X")[: step + 1].tolist()
+        traj_y = self._col("Current_Y")[: step + 1].tolist()
+        # Try to get Current_Z col, else zeros
+        if "Current_Z" in current_data:
+            traj_z = self._col("Current_Z")[: step + 1].tolist()
+        else:
+            traj_z = [0.0] * len(traj_x)
+        self.draw_trajectory(traj_x, traj_y, traj_z)
 
-        # Draw satellite with type-safe extraction
-        current_x_val = current_data["Current_X"]
-        current_x = float(current_x_val) if current_x_val is not None else 0.0
-        current_y_val = current_data["Current_Y"]
-        current_y = float(current_y_val) if current_y_val is not None else 0.0
-        current_yaw_val = current_data["Current_Yaw"]
-        current_yaw = float(current_yaw_val) if current_yaw_val is not None else 0.0
+        # Draw satellite
+        curr_x = float(current_data.get("Current_X", 0.0) or 0.0)
+        curr_y = float(current_data.get("Current_Y", 0.0) or 0.0)
+        curr_z = float(current_data.get("Current_Z", 0.0) or 0.0)
+        curr_yaw = float(current_data.get("Current_Yaw", 0.0) or 0.0)
 
         self.draw_satellite(
-            current_x,
-            current_y,
-            current_yaw,
+            curr_x,
+            curr_y,
+            curr_z,
+            curr_yaw,
             active_thrusters,
         )
+        return []
 
         # Draw obstacles
         self.draw_obstacles()

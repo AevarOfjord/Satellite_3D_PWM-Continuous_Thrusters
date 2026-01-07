@@ -67,37 +67,37 @@ class MissionState:
 
     # Waypoint Navigation
     enable_waypoint_mode: bool = False
-    waypoint_targets: List[Tuple[float, float]] = field(default_factory=list)
+    waypoint_targets: List[Tuple[float, float, float]] = field(default_factory=list)
     waypoint_angles: List[float] = field(default_factory=list)
     current_target_index: int = 0
     target_stabilization_start_time: Optional[float] = None
     waypoint_phase: Optional[str] = None
 
     enable_multi_point_mode: bool = False
-    multi_point_targets: List[Tuple[float, float]] = field(default_factory=list)
+    multi_point_targets: List[Tuple[float, float, float]] = field(default_factory=list)
     multi_point_angles: List[float] = field(default_factory=list)
     multi_point_phase: Optional[str] = None
 
     # Shape Following - Path tracking
     dxf_shape_mode_active: bool = False
-    dxf_shape_center: Optional[Tuple[float, float]] = None
-    dxf_shape_path: List[Tuple[float, float]] = field(default_factory=list)
-    dxf_base_shape: List[Tuple[float, float]] = field(default_factory=list)
+    dxf_shape_center: Optional[Tuple[float, float, float]] = None
+    dxf_shape_path: List[Tuple[float, float, float]] = field(default_factory=list)
+    dxf_base_shape: List[Tuple[float, float, float]] = field(default_factory=list)
     dxf_target_speed: float = 0.1
     dxf_estimated_duration: float = 60.0
     dxf_shape_phase: str = "POSITIONING"
     dxf_path_length: float = 0.0
     dxf_closest_point_index: int = 0
-    dxf_current_target_position: Optional[Tuple[float, float]] = None
+    dxf_current_target_position: Optional[Tuple[float, float, float]] = None
     dxf_tracking_start_time: Optional[float] = None
     dxf_target_start_distance: float = 0.0
     dxf_mission_start_time: Optional[float] = None
     dxf_stabilization_start_time: Optional[float] = None
-    dxf_final_position: Optional[Tuple[float, float]] = None
+    dxf_final_position: Optional[Tuple[float, float, float]] = None
     dxf_shape_rotation: float = 0.0
     dxf_offset_distance: float = 0.5
     dxf_has_return: bool = False
-    dxf_return_position: Optional[Tuple[float, float]] = None
+    dxf_return_position: Optional[Tuple[float, float, float]] = None
     dxf_return_angle: Optional[float] = None
     dxf_return_start_time: Optional[float] = None
 

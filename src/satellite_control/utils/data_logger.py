@@ -206,15 +206,27 @@ class DataLogger:
             "Time",
             "Current_X",
             "Current_Y",
+            "Current_Z",
+            "Current_Roll",
+            "Current_Pitch",
             "Current_Yaw",
             "Current_VX",
             "Current_VY",
-            "Current_Angular_Vel",
+            "Current_VZ",
+            "Current_WX",
+            "Current_WY",
+            "Current_WZ",
             "Target_X",
             "Target_Y",
+            "Target_Z",
+            "Target_Roll",
+            "Target_Pitch",
             "Target_Yaw",
             "Error_X",
             "Error_Y",
+            "Error_Z",
+            "Error_Roll",
+            "Error_Pitch",
             "Error_Yaw",
             "Command_Vector",
             "Thruster_1_Cmd",
@@ -233,6 +245,14 @@ class DataLogger:
             "Thruster_7_Val",
             "Thruster_8_Cmd",
             "Thruster_8_Val",
+            "Thruster_9_Cmd",
+            "Thruster_9_Val",
+            "Thruster_10_Cmd",
+            "Thruster_10_Val",
+            "Thruster_11_Cmd",
+            "Thruster_11_Val",
+            "Thruster_12_Cmd",
+            "Thruster_12_Val",
         ]
 
     def _get_simulation_headers(self) -> List[str]:
@@ -246,26 +266,47 @@ class DataLogger:
             "Mission_Phase",
             "Waypoint_Number",
             "Telemetry_X_mm",
+            "Telemetry_Y_mm",
             "Telemetry_Z_mm",
+            "Telemetry_Roll_deg",
+            "Telemetry_Pitch_deg",
             "Telemetry_Yaw_deg",
             "Current_X",
             "Current_Y",
+            "Current_Z",
+            "Current_Roll",
+            "Current_Pitch",
             "Current_Yaw",
             "Current_VX",
             "Current_VY",
-            "Current_Angular_Vel",
+            "Current_VZ",
+            "Current_WX",
+            "Current_WY",
+            "Current_WZ",
             "Target_X",
             "Target_Y",
+            "Target_Z",
+            "Target_Roll",
+            "Target_Pitch",
             "Target_Yaw",
             "Target_VX",
             "Target_VY",
-            "Target_Angular_Vel",
+            "Target_VZ",
+            "Target_WX",
+            "Target_WY",
+            "Target_WZ",
             "Error_X",
             "Error_Y",
+            "Error_Z",
+            "Error_Roll",
+            "Error_Pitch",
             "Error_Yaw",
             "Error_VX",
             "Error_VY",
-            "Error_Angular_Vel",
+            "Error_VZ",
+            "Error_WX",
+            "Error_WY",
+            "Error_WZ",
             "MPC_Computation_Time",
             "MPC_Status",
             "MPC_Solver",
@@ -352,39 +393,61 @@ class DataLogger:
                 return f"{num_value:.3f}"
 
             # Telemetry positions (mm) - 2 decimals (0.01mm precision)
-            elif header in ["Telemetry_X_mm", "Telemetry_Z_mm"]:
+            elif header in ["Telemetry_X_mm", "Telemetry_Y_mm", "Telemetry_Z_mm"]:
                 return f"{num_value:.2f}"
 
             # Telemetry angle (degrees) - 2 decimals (0.01 degree precision)
-            elif header in ["Telemetry_Yaw_deg"]:
+            elif header in ["Telemetry_Roll_deg", "Telemetry_Pitch_deg", "Telemetry_Yaw_deg"]:
                 return f"{num_value:.2f}"
 
             # Position values (meters) - 5 decimals (0.01mm precision)
             elif header in [
                 "Current_X",
                 "Current_Y",
+                "Current_Z",
                 "Target_X",
                 "Target_Y",
+                "Target_Z",
                 "Error_X",
                 "Error_Y",
+                "Error_Z",
             ]:
                 return f"{num_value:.5f}"
 
             # Angle values (radians) - 5 decimals (0.01 degree precision)
-            elif header in ["Current_Yaw", "Target_Yaw", "Error_Yaw"]:
+            elif header in [
+                "Current_Roll",
+                "Current_Pitch",
+                "Current_Yaw",
+                "Target_Roll",
+                "Target_Pitch",
+                "Target_Yaw",
+                "Error_Roll",
+                "Error_Pitch",
+                "Error_Yaw",
+            ]:
                 return f"{num_value:.5f}"
 
             # Velocity values - 5 decimals (0.01mm/s precision)
             elif header in [
                 "Current_VX",
                 "Current_VY",
-                "Current_Angular_Vel",
+                "Current_VZ",
+                "Current_WX",
+                "Current_WY",
+                "Current_WZ",
                 "Target_VX",
                 "Target_VY",
-                "Target_Angular_Vel",
+                "Target_VZ",
+                "Target_WX",
+                "Target_WY",
+                "Target_WZ",
                 "Error_VX",
                 "Error_VY",
-                "Error_Angular_Vel",
+                "Error_VZ",
+                "Error_WX",
+                "Error_WY",
+                "Error_WZ",
             ]:
                 return f"{num_value:.5f}"
 

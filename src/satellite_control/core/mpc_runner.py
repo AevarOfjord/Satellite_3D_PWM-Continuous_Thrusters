@@ -46,7 +46,7 @@ class MPCRunner:
         self.state_validator = state_validator
 
         # Internal state management
-        self.previous_thrusters = np.zeros(8, dtype=np.float64)
+        self.previous_thrusters = np.zeros(12, dtype=np.float64)
         self.command_history: list = []
         self.call_count = 0
 
@@ -106,20 +106,20 @@ class MPCRunner:
             if thruster_action.ndim == 2:
                 thruster_action = thruster_action[0, :]
 
-            # Validate size - must be 8 thrusters
-            if len(thruster_action) != 8:
+            # Validate size - must be 12 thrusters
+            if len(thruster_action) != 12:
                 logger.error(
                     f"Invalid thruster array size {len(thruster_action)}, "
-                    "expected 8. Defaulting to zero thrust."
+                    "expected 12. Defaulting to zero thrust."
                 )
-                thruster_action = np.zeros(8, dtype=np.float64)
+                thruster_action = np.zeros(12, dtype=np.float64)
             else:
                 # Enforce bounds
                 thruster_action = np.clip(thruster_action, 0.0, 1.0).astype(np.float64)
         else:
             # Fallback if controller failed completely (should return
             # fallback though)
-            thruster_action = np.zeros(8, dtype=np.float64)
+            thruster_action = np.zeros(12, dtype=np.float64)
             logger.error("Controller returned None! Defaulting to zero thrust.")
 
         # Update internal state
@@ -136,7 +136,7 @@ class MPCRunner:
 
     def reset(self) -> None:
         """Reset runner state for a new simulation run."""
-        self.previous_thrusters = np.zeros(8, dtype=np.float64)
+        self.previous_thrusters = np.zeros(12, dtype=np.float64)
         self.command_history.clear()
         self.call_count = 0
 

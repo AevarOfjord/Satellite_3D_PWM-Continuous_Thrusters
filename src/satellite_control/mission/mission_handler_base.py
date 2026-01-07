@@ -44,19 +44,19 @@ class MissionHandler(ABC):
     def update_target(
         self,
         current_position: np.ndarray,
-        current_angle: float,
+        current_quat: np.ndarray,
         current_time: float,
     ) -> Optional[np.ndarray]:
         """
         Calculate target state based on current position and time.
 
         Args:
-            current_position: Current satellite position [x, y]
-            current_angle: Current satellite orientation in radians
+            current_position: Current satellite position [x, y, z]
+            current_quat: Current satellite orientation quaternion [w, x, y, z]
             current_time: Current simulation time in seconds
 
         Returns:
-            Target state vector [x, y, vx, vy, theta, omega] or None
+            Target state vector [pos(3), quat(4), vel(3), w(3)] or None
         """
         pass
 

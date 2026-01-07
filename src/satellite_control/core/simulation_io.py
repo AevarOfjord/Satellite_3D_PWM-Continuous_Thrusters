@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, List, Optional, Union
 
 import numpy as np
+from scipy.spatial.transform import Rotation
 
 if TYPE_CHECKING:
     from src.satellite_control.core.simulation import (
@@ -129,17 +130,47 @@ class SimulationIO:
             csv_path = self.sim.data_save_path / "control_data.csv"
             if csv_path.exists():
                 df = pd.read_csv(csv_path)
-                values: np.ndarray = df[
-                    [
-                        "Current_X",
-                        "Current_Y",
-                        "Current_VX",
-                        "Current_VY",
-                        "Current_Yaw",
-                        "Current_Angular_Vel",
-                    ]
-                ].values.astype(np.float64)
-                return values
+
+                # Check if 3D columns exist
+                if "Current_Z" in df.columns:
+                    # Load 3D data
+                    pos = df[["Current_X", "Current_Y", "Current_Z"]].values
+                    vel = df[["Current_VX", "Current_VY", "Current_VZ"]].values
+                    ang_vel = df[["Current_WX", "Current_WY", "Current_WZ"]].values
+
+                    # Euler to Quat
+                    # Yaw, Roll, Pitch might be logged.
+                    # simulation_logger logs: Current_Roll, Current_Pitch, Current_Yaw
+                    r = df["Current_Roll"].values
+                    p = df["Current_Pitch"].values
+                    y = df["Current_Yaw"].values
+
+                    # Stack and convert
+                    euler = np.column_stack([r, p, y])
+                    quat = Rotation.from_euler("xyz", euler, degrees=False).as_quat()
+                    # Scipy output is xyzw, we want wxyz for internal state usually?
+                    # simulation.py usually expects [w, x, y, z] or [q0, q1, q2, q3]
+                    # Let's check logic: mpc_controller says [qw, qx, qy, qz]
+                    # Scipy is [x, y, z, w]
+                    quat_wxyz = np.column_stack([quat[:, 3], quat[:, 0], quat[:, 1], quat[:, 2]])
+
+                    # Construct 13-element state: [pos(3), quat(4), vel(3), ang_vel(3)]
+                    # Shape (N, 13)
+                    state_history = np.column_stack([pos, quat_wxyz, vel, ang_vel])
+                    return state_history
+                else:
+                    # Legacy 2D fallback
+                    values: np.ndarray = df[
+                        [
+                            "Current_X",
+                            "Current_Y",
+                            "Current_VX",
+                            "Current_VY",
+                            "Current_Yaw",
+                            "Current_Angular_Vel",
+                        ]
+                    ].values.astype(np.float64)
+                    return values
         except Exception as e:
             logger.debug(f"Could not load history from CSV: {e}")
 

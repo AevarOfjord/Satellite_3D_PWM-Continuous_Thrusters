@@ -61,6 +61,11 @@ except ImportError:
     print("  ezdxf not available. Install with: pip install ezdxf")
 
 
+def to_3d(point_2d: Tuple[float, float]) -> Tuple[float, float, float]:
+    """Convert 2D point to 3D with Z=0."""
+    return (point_2d[0], point_2d[1], 0.0)
+
+
 class DXFShapeMaker:
     """Interactive DXF shape creation tool."""
 
@@ -188,10 +193,10 @@ class DXFShapeMaker:
             self.finish_current_shape()
 
     def add_point(self, x: float, y: float):
-        """Add a point to the current shape."""
+        """Add a point to the current shape (stored as 3D)."""
         if self.drawing_mode == "line" or self.drawing_mode == "spline":
-            self.current_points.append((x, y))
-            print(f" Added point: ({x:.2f}, {y:.2f})")
+            self.current_points.append((x, y, 0.0))
+            print(f" Added point: ({x:.2f}, {y:.2f}, 0.00)")
 
         elif self.drawing_mode == "circle":
             if self.circle_center is None:
@@ -221,15 +226,11 @@ class DXFShapeMaker:
                     "Click for end point."
                 )
             else:
-                end_angle = np.arctan2(
-                    y - self.circle_center[1], x - self.circle_center[0]
-                )
+                end_angle = np.arctan2(y - self.circle_center[1], x - self.circle_center[0])
                 radius = np.sqrt(
                     (x - self.circle_center[0]) ** 2 + (y - self.circle_center[1]) ** 2
                 )
-                self.add_arc(
-                    self.circle_center, radius, self.arc_start_angle, end_angle
-                )
+                self.add_arc(self.circle_center, radius, self.arc_start_angle, end_angle)
                 self.circle_center = None
                 self.arc_start_angle = None
 
@@ -247,8 +248,15 @@ class DXFShapeMaker:
                 points.append((x, y))
 
         if len(points) >= 3:  # Need at least 3 points for a shape
+            # Convert circle sample points to 3D
+            points_3d = [(p[0], p[1], 0.0) for p in points]
             self.shapes.append(
-                {"type": "circle", "center": center, "radius": radius, "points": points}
+                {
+                    "type": "circle",
+                    "center": (center[0], center[1], 0.0),
+                    "radius": radius,
+                    "points": points_3d,
+                }
             )
             print(
                 f" Added circle: center=({center[0]:.2f}, {center[1]:.2f}), "
@@ -282,14 +290,15 @@ class DXFShapeMaker:
                 points.append((x, y))
 
         if len(points) >= 2:
+            points_3d = [(p[0], p[1], 0.0) for p in points]
             self.shapes.append(
                 {
                     "type": "arc",
-                    "center": center,
+                    "center": (center[0], center[1], 0.0),
                     "radius": radius,
                     "start_angle": start_angle,
                     "end_angle": end_angle,
-                    "points": points,
+                    "points": points_3d,
                 }
             )
             print(
@@ -302,9 +311,7 @@ class DXFShapeMaker:
     def finish_current_shape(self):
         """Finish the current line/spline shape."""
         if len(self.current_points) >= 2:
-            self.shapes.append(
-                {"type": self.drawing_mode, "points": self.current_points.copy()}
-            )
+            self.shapes.append({"type": self.drawing_mode, "points": self.current_points.copy()})
             print(f" Added {self.drawing_mode}: " f"{len(self.current_points)} points")
             self.current_points = []
             self.update_display()
@@ -392,9 +399,7 @@ class DXFShapeMaker:
                     abs(x - self._last_mouse_pos[0]) > 0.01
                     or abs(y - self._last_mouse_pos[1]) > 0.01
                 ):
-                    print(
-                        f"  Mouse: ({x:.2f}, {y:.2f}) - " f"Mode: {self.drawing_mode}"
-                    )
+                    print(f"  Mouse: ({x:.2f}, {y:.2f}) - " f"Mode: {self.drawing_mode}")
             self._last_mouse_pos = (x, y)
 
     def update_display(self):
@@ -520,7 +525,12 @@ class DXFShapeMaker:
 
             elif shape["type"] == "spline":
                 points = shape["points"]
-                msp.add_lwpolyline(points)
+                msp.add_lwpolyline(
+                    points
+                )  # ezdxf handles 3D points if passed, but lwpolyline is technically 2D.
+                # Use add_polyline3d / add_spline for true 3D if needed, but lwpolyline accepts (x,y,z) and ignores Z or writes to elevation?
+                # Actually lwpolyline is 2D. Let's use 3D Polyline for safety.
+                msp.add_polyline3d(points)
 
             elif shape["type"] == "circle":
                 msp.add_circle(shape["center"], shape["radius"])
@@ -630,10 +640,7 @@ def main():
             try:
                 matplotlib.use("Agg")
                 print(" Non-interactive backend - drawing will not work")
-                print(
-                    " Try installing tkinter: "
-                    "sudo apt-get install python3-tk (Linux)"
-                )
+                print(" Try installing tkinter: " "sudo apt-get install python3-tk (Linux)")
                 print(" Or try installing PyQt5: pip install PyQt5")
             except Exception as e3:
                 print(f" All backends failed: {e3}")

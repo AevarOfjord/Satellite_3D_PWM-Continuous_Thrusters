@@ -71,10 +71,10 @@ def simple_simulation():
     }
 
     sim = SatelliteMPCLinearizedSimulation(
-        start_pos=(0.5, 0.5),
-        target_pos=(0.0, 0.0),
-        start_angle=0.0,
-        target_angle=0.0,
+        start_pos=(0.5, 0.5, 0.0),
+        target_pos=(0.0, 0.0, 0.0),
+        start_angle=(0.0, 0.0, 0.0),
+        target_angle=(0.0, 0.0, 0.0),
         config_overrides=config_overrides,
     )
 
@@ -102,8 +102,8 @@ class TestPointToPointMission:
 
         current_state = sim.get_current_state()
 
-        # Should be [x, y, vx, vy, theta, omega] format
-        assert len(current_state) == 6
+        # Should be [pos(3), quat(4), vel(3), w(3)] format
+        assert len(current_state) == 13
         assert current_state[0] == pytest.approx(0.5, abs=0.01)  # x
         assert current_state[1] == pytest.approx(0.5, abs=0.01)  # y
 
@@ -115,9 +115,9 @@ class TestPointToPointMission:
         assert not sim.check_target_reached()
 
         # Move satellite to target
-        sim.satellite.position = np.array([0.0, 0.0])
-        sim.satellite.velocity = np.array([0.0, 0.0])
-        sim.satellite.angle = 0.0
+        sim.satellite.position = np.array([0.0, 0.0, 0.0])
+        sim.satellite.velocity = np.array([0.0, 0.0, 0.0])
+        sim.satellite.angle = (0.0, 0.0, 0.0)
         sim.satellite.angular_velocity = 0.0
 
         # Now should be at target
@@ -210,7 +210,7 @@ class TestMultiPointMission:
             patch.object(
                 SatelliteConfig,
                 "WAYPOINT_TARGETS",
-                [(1.0, 0.0, 0.0), (0.0, 1.0, np.pi / 2)],
+                [(1.0, 0.0, 0.0), (0.0, 1.0, 0.0)],
             ),
             patch.object(SatelliteConfig, "CURRENT_TARGET_INDEX", 0),
         ):
@@ -233,14 +233,14 @@ class TestMultiPointMission:
             patch.object(SatelliteConfig, "get_current_waypoint_target") as mock_get,
         ):
             mock_advance.return_value = True
-            mock_get.return_value = ((0.0, 1.0), np.pi / 2)
+            mock_get.return_value = ((0.0, 1.0, 0.0), (0.0, 0.0, np.pi / 2))
 
             # Simulate target advancement
             next_available = SatelliteConfig.advance_to_next_target()
             assert next_available
 
             target_pos, target_angle = SatelliteConfig.get_current_waypoint_target()
-            assert target_pos == (0.0, 1.0)
+            assert target_pos == (0.0, 1.0, 0.0)
 
 
 class TestMPCSimulationIntegration:
@@ -267,9 +267,8 @@ class TestMPCSimulationIntegration:
         ):
             sim.update_mpc_control()
 
-            # MPC internal format should be [x, y, theta, vx, vy, omega]
-            # But get_control_action handles conversion internally
-            # So we receive simulation format [x, y, vx, vy, theta, omega]
+            # MPC internal format should be [pos(3), quat(4), vel(3), w(3)]
+            # get_control_action expects the full 13-element state
             assert captured_state is not None
 
     def test_simulation_applies_mpc_control(self, simple_simulation):
@@ -318,10 +317,10 @@ class TestStateValidation:
         sim = simple_simulation
 
         current_state = sim.get_current_state()
-        assert len(current_state) == 6
+        assert len(current_state) == 13
 
         target_state = sim.target_state
-        assert len(target_state) == 6
+        assert len(target_state) == 13
 
     def test_angle_normalization(self, simple_simulation):
         """Test angle normalization in simulation."""
@@ -566,9 +565,9 @@ class TestMissionCompletion:
         sim = simple_simulation
 
         # Move satellite to target
-        sim.satellite.position = np.array([0.0, 0.0])
-        sim.satellite.velocity = np.array([0.0, 0.0])
-        sim.satellite.angle = 0.0
+        sim.satellite.position = np.array([0.0, 0.0, 0.0])
+        sim.satellite.velocity = np.array([0.0, 0.0, 0.0])
+        sim.satellite.angle = (0.0, 0.0, 0.0)
         sim.satellite.angular_velocity = 0.0
 
         # Set target reached

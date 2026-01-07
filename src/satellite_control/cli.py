@@ -56,10 +56,10 @@ def run(
 
     if auto:
         console.print("[yellow]Running in AUTO mode with default parameters...[/yellow]")
-        SatelliteConfig.DEFAULT_START_POS = (1.0, 1.0)
-        SatelliteConfig.DEFAULT_TARGET_POS = (0.0, 0.0)
-        SatelliteConfig.DEFAULT_START_ANGLE = 0.0
-        SatelliteConfig.DEFAULT_TARGET_ANGLE = 0.0
+        SatelliteConfig.DEFAULT_START_POS = (1.0, 1.0, 0.0)
+        SatelliteConfig.DEFAULT_TARGET_POS = (0.0, 0.0, 0.0)
+        SatelliteConfig.DEFAULT_START_ANGLE = (0.0, 0.0, 0.0)
+        SatelliteConfig.DEFAULT_TARGET_ANGLE = (0.0, 0.0, 0.0)
     elif classic:
         # Use classic text-based menu
         mission_manager = MissionManager()

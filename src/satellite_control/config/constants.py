@@ -95,10 +95,10 @@ class Constants:
     # MISSION DEFAULTS
     # ========================================================================
 
-    DEFAULT_START_POS = (-1.0, -1.0)
-    DEFAULT_TARGET_POS = (0.0, 0.0)
-    DEFAULT_START_ANGLE = np.deg2rad(90)
-    DEFAULT_TARGET_ANGLE = np.deg2rad(90)
+    DEFAULT_START_POS = (-1.0, -1.0, 0.0)
+    DEFAULT_TARGET_POS = (0.0, 0.0, 0.0)
+    DEFAULT_START_ANGLE = (0.0, 0.0, np.deg2rad(90))  # Roll, Pitch, Yaw
+    DEFAULT_TARGET_ANGLE = (0.0, 0.0, np.deg2rad(90))  # Roll, Pitch, Yaw
 
     # ========================================================================
     # HELPER METHODS

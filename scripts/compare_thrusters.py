@@ -7,9 +7,11 @@ def run_comparison():
 
     # 1. PWM Mode
     print("\n1. PWM MODE (thruster_type='PWM')")
-    pwm_manager = ThrusterManager(num_thrusters=2, thruster_type="PWM")
-    # Command 50% thrust
-    pwm_manager.set_thruster_pattern(np.array([0.5, 0.0]), simulation_time=0.0)
+    pwm_manager = ThrusterManager(num_thrusters=12, thruster_type="PWM")
+    # Command 50% thrust on thruster 1
+    pattern = np.zeros(12)
+    pattern[0] = 0.5
+    pwm_manager.set_thruster_pattern(pattern, simulation_time=0.0)
 
     print("   Command: 50% (0.50)")
     print("   Output over 1 second (dt=0.1s):")
@@ -29,9 +31,12 @@ def run_comparison():
 
     # 2. Continuous Mode
     print("\n2. CONTINUOUS MODE (thruster_type='CON')")
-    con_manager = ThrusterManager(num_thrusters=2, thruster_type="CON")
-    # Command 37% thrust
-    con_manager.set_thruster_pattern(np.array([0.37, 0.0]), simulation_time=0.0)
+    print("\n2. CONTINUOUS MODE (thruster_type='CON')")
+    con_manager = ThrusterManager(num_thrusters=12, thruster_type="CON")
+    # Command 37% thrust on thruster 1
+    pattern = np.zeros(12)
+    pattern[0] = 0.37
+    con_manager.set_thruster_pattern(pattern, simulation_time=0.0)
 
     print("   Command: 37% (0.37)")
     print("   Output over 1 second:")

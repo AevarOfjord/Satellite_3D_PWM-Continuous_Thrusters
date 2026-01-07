@@ -20,8 +20,8 @@ class OverlayData:
     simulation_time: float = 0.0
 
     # Position tracking
-    current_pos: Tuple[float, float] = (0.0, 0.0)
-    target_pos: Tuple[float, float] = (0.0, 0.0)
+    current_pos: Tuple[float, float, float] = (0.0, 0.0, 0.0)
+    target_pos: Tuple[float, float, float] = (0.0, 0.0, 0.0)
     position_error: float = 0.0
 
     # Angle tracking
@@ -33,8 +33,8 @@ class OverlayData:
     mpc_solve_time_ms: float = 0.0
     mpc_status: str = "OK"
 
-    # Thruster activity (8 thrusters, 0.0-1.0 each)
-    thruster_levels: Tuple[float, ...] = (0.0,) * 8
+    # Thruster activity (12 thrusters, 0.0-1.0 each)
+    thruster_levels: Tuple[float, ...] = (0.0,) * 12
 
 
 class ViewerOverlay:
@@ -52,8 +52,8 @@ class ViewerOverlay:
         self,
         phase: str,
         sim_time: float,
-        current_pos: Tuple[float, float],
-        target_pos: Tuple[float, float],
+        current_pos: Tuple[float, float, float],
+        target_pos: Tuple[float, float, float],
         current_angle: float,
         target_angle: float,
         mpc_solve_time: float,
@@ -72,10 +72,25 @@ class ViewerOverlay:
         self.data.thruster_levels = thruster_levels
 
         # Calculate errors
-        self.data.position_error = np.sqrt(
-            (current_pos[0] - target_pos[0]) ** 2 + (current_pos[1] - target_pos[1]) ** 2
-        )
-        self.data.angle_error = abs(self._normalize_angle(current_angle - target_angle))
+        # Calculate errors (3D)
+        cp = np.array(current_pos)
+        tp = np.array(target_pos)
+        self.data.position_error = float(np.linalg.norm(cp - tp))
+
+        # Angle error is passed as scalar usually, or computed here from quaternions?
+        # The signature takes `current_angle: float` which implies scalar Yaw or 2D angle.
+        # But in 3D we have quaternions or 3D Euler angles.
+        # IF the input `current_angle` is just Yaw, then this calculation is valid for Yaw error.
+        # Ideally, we should receive the total angular error from the validator/simulation logic.
+        # For visualization purposes, let's assume `current_angle` is either Yaw or
+        # that we should just compute simple difference if scalar.
+        if isinstance(current_angle, (float, int)) and isinstance(target_angle, (float, int)):
+            self.data.angle_error = abs(self._normalize_angle(current_angle - target_angle))
+        else:
+            # If vectors/quaternions passed, assume error is pre-calculated or handle separately.
+            # For now, keep simpler logic or rely on caller to pass updated error?
+            # Actually, let's just use scalar difference of what is passed (likely Yaw).
+            pass
 
     def get_status_text(self) -> str:
         """Get formatted status text for top-left overlay."""
@@ -120,12 +135,12 @@ class ViewerOverlay:
 
     def get_position_text(self) -> str:
         """Get formatted position text."""
-        cx, cy = self.data.current_pos
-        tx, ty = self.data.target_pos
+        cx, cy, cz = self.data.current_pos
+        tx, ty, tz = self.data.target_pos
 
         lines = [
-            f"Pos: ({cx*1000:.0f}, {cy*1000:.0f})mm",
-            f"Tgt: ({tx*1000:.0f}, {ty*1000:.0f})mm",
+            f"Pos: ({cx*1000:.0f}, {cy*1000:.0f}, {cz*1000:.0f})mm",
+            f"Tgt: ({tx*1000:.0f}, {ty*1000:.0f}, {tz*1000:.0f})mm",
         ]
         return "\n".join(lines)
 

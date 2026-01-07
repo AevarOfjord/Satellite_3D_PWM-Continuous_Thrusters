@@ -166,8 +166,8 @@ class MonteCarloRunner:
             sim = SatelliteMPCLinearizedSimulation(
                 start_pos=(trial_config.initial_x, trial_config.initial_y),
                 target_pos=(trial_config.target_x, trial_config.target_y),
-                start_angle=trial_config.initial_theta,
-                target_angle=trial_config.target_theta,
+                start_angle=(0.0, 0.0, trial_config.initial_theta),
+                target_angle=(0.0, 0.0, trial_config.target_theta),
                 start_vx=trial_config.initial_vx,
                 start_vy=trial_config.initial_vy,
                 start_omega=trial_config.initial_omega,
@@ -194,7 +194,13 @@ class MonteCarloRunner:
                 (final_state[0] - trial_config.target_x) ** 2
                 + (final_state[1] - trial_config.target_y) ** 2
             )
-            angle_error = abs(final_state[4] - trial_config.target_theta)
+            from src.satellite_control.utils.orientation_utils import (
+                euler_xyz_to_quat_wxyz,
+                quat_angle_error,
+            )
+
+            target_quat = euler_xyz_to_quat_wxyz((0.0, 0.0, trial_config.target_theta))
+            angle_error = quat_angle_error(target_quat, final_state[3:7])
 
             # Check success
             success = (

@@ -32,6 +32,9 @@ class MPCConfig:
     """
     Model Predictive Control tuning and limits.
 
+    State Vector (13 elements):
+    [x, y, z, qw, qx, qy, qz, vx, vy, vz, wx, wy, wz]
+
     Attributes:
         prediction_horizon: Number of future steps to predict
         control_horizon: Number of control steps to optimize

@@ -1,6 +1,11 @@
 <mujoco model="satellite_3d">
   <compiler angle="degree" coordinate="local" inertiafromgeom="true"/>
-  <option integrator="RK4" timestep="0.005"/>
+  <option integrator="RK4" timestep="0.005" gravity="0 0 0"/>
+  
+  <visual>
+    <global offwidth="2560" offheight="1440"/>
+  </visual>
+
   <default>
     <joint armature="0" damping="0" limited="false"/>
     <geom conaffinity="0" condim="3" density="500" friction="1 0.5 0.5" margin="0" material="geom" rgba="0.8 0.6 0.4 1"/>
@@ -19,6 +24,9 @@
     
     <!-- Floor for reference -->
     <geom name="floor" size="10 10 .05" type="plane" material="grid" pos="0 0 -3.0"/>
+
+    <!-- Overhead Camera -->
+    <camera name="overhead_cam" pos="0 0 4" mode="fixed" xyaxes="1 0 0 0 1 0"/>
 
     <body name="satellite" pos="0 0 0">
       <!-- 6-DOF Free Joint -->

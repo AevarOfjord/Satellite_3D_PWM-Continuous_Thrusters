@@ -41,6 +41,7 @@ import sys
 import math
 from pathlib import Path
 from typing import List, Tuple
+from mpl_toolkits.mplot3d import Axes3D
 
 import argparse
 
@@ -86,9 +87,7 @@ def units_code_to_name_and_scale(insunits: int) -> Tuple[str, float]:
     return mapping.get(insunits, ("unitless", 1.0))
 
 
-def sample_circle(
-    cx: float, cy: float, r: float, segments: int = 256
-) -> List[Tuple[float, float]]:
+def sample_circle(cx: float, cy: float, r: float, segments: int = 256) -> List[Tuple[float, float]]:
     pts = []
     for i in range(segments + 1):
         a = 2 * math.pi * i / segments
@@ -120,10 +119,9 @@ def sample_arc(
     return pts
 
 
-def collect_2d_paths(msp) -> List[List[Tuple[float, float]]]:
-    """Collect 2D paths from supported entities as polylines of (x,y)
-    points."""
-    paths: List[List[Tuple[float, float]]] = []
+def collect_paths_3d(msp) -> List[List[Tuple[float, float, float]]]:
+    """Collect 3D paths from supported entities as polylines of (x,y,z) points."""
+    paths: List[List[Tuple[float, float, float]]] = []
 
     for e in msp.query("LWPOLYLINE"):
         pts: List[Tuple[float, float]] = []
@@ -142,8 +140,8 @@ def collect_2d_paths(msp) -> List[List[Tuple[float, float]]]:
             for seg in segs:
                 dxft = seg.dxftype()
                 if dxft == "LINE":
-                    s = (seg.dxf.start.x, seg.dxf.start.y)
-                    ept = (seg.dxf.end.x, seg.dxf.end.y)
+                    s = (seg.dxf.start.x, seg.dxf.start.y, getattr(seg.dxf.start, "z", 0.0))
+                    ept = (seg.dxf.end.x, seg.dxf.end.y, getattr(seg.dxf.end, "z", 0.0))
                     append_pt(s)
                     append_pt(ept)
                 elif dxft == "ARC":
@@ -152,10 +150,13 @@ def collect_2d_paths(msp) -> List[List[Tuple[float, float]]]:
                     sa = float(seg.dxf.start_angle)
                     ea = float(seg.dxf.end_angle)
                     for p in sample_arc(c.x, c.y, r, sa, ea, segments=128):
-                        append_pt(p)
+                        append_pt((p[0], p[1], 0.0))
         if not pts:
             # Fallback to raw vertices
-            pts = [(v[0], v[1]) for v in e.get_points()]
+            pts = [
+                (v[0], v[1], getattr(v, "z", 0.0)) if hasattr(v, "z") else (v[0], v[1], 0.0)
+                for v in e.get_points()
+            ]
         if e.closed and pts and pts[0] != pts[-1]:
             pts.append(pts[0])
         if len(pts) >= 2:
@@ -164,9 +165,15 @@ def collect_2d_paths(msp) -> List[List[Tuple[float, float]]]:
     # 2D POLYLINE
     for e in msp.query("POLYLINE"):
         if e.is_2d_polyline or e.is_polygon_mesh or e.is_poly_face_mesh:
-            pts = [(v.dxf.location.x, v.dxf.location.y) for v in e.vertices]
+            pts = [
+                (v.dxf.location.x, v.dxf.location.y, getattr(v.dxf.location, "z", 0.0))
+                for v in e.vertices
+            ]
         else:
-            pts = [(v.dxf.location.x, v.dxf.location.y) for v in e.vertices]
+            pts = [
+                (v.dxf.location.x, v.dxf.location.y, getattr(v.dxf.location, "z", 0.0))
+                for v in e.vertices
+            ]
         if e.is_closed and pts and pts[0] != pts[-1]:
             pts.append(pts[0])
         if len(pts) >= 2:
@@ -174,56 +181,61 @@ def collect_2d_paths(msp) -> List[List[Tuple[float, float]]]:
 
     # LINE
     for e in msp.query("LINE"):
-        pts = [(e.dxf.start.x, e.dxf.start.y), (e.dxf.end.x, e.dxf.end.y)]
+        pts = [
+            (e.dxf.start.x, e.dxf.start.y, getattr(e.dxf.start, "z", 0.0)),
+            (e.dxf.end.x, e.dxf.end.y, getattr(e.dxf.end, "z", 0.0)),
+        ]
         paths.append(pts)
 
     # ARC
     for e in msp.query("ARC"):
         c = e.dxf.center
         r = float(e.dxf.radius)
-        pts = sample_arc(c.x, c.y, r, float(e.dxf.start_angle), float(e.dxf.end_angle))
+        z = getattr(c, "z", 0.0)
+        pts_2d = sample_arc(c.x, c.y, r, float(e.dxf.start_angle), float(e.dxf.end_angle))
+        pts = [(p[0], p[1], z) for p in pts_2d]
         paths.append(pts)
 
     # CIRCLE
     for e in msp.query("CIRCLE"):
         c = e.dxf.center
         r = float(e.dxf.radius)
-        pts = sample_circle(c.x, c.y, r)
+        z = getattr(c, "z", 0.0)
+        pts_2d = sample_circle(c.x, c.y, r)
+        pts = [(p[0], p[1], z) for p in pts_2d]
         paths.append(pts)
 
     return paths
 
 
-def _is_closed(path: List[Tuple[float, float]], tol: float = 1e-6) -> bool:
-    return (
-        len(path) > 2
-        and math.hypot(path[0][0] - path[-1][0], path[0][1] - path[-1][1]) <= tol
-    )
+def _is_closed(path: List[Tuple[float, float, float]], tol: float = 1e-6) -> bool:
+    return len(path) > 2 and math.hypot(path[0][0] - path[-1][0], path[0][1] - path[-1][1]) <= tol
 
 
 def _dedup_consecutive(
-    path: List[Tuple[float, float]], tol: float = 1e-9
-) -> List[Tuple[float, float]]:
-    out: List[Tuple[float, float]] = []
+    path: List[Tuple[float, float, float]], tol: float = 1e-9
+) -> List[Tuple[float, float, float]]:
+    out: List[Tuple[float, float, float]] = []
     for p in path:
         if not out or math.hypot(p[0] - out[-1][0], p[1] - out[-1][1]) > tol:
             out.append(p)
     return out
 
 
-def _polygon_area(path: List[Tuple[float, float]]) -> float:
+def _polygon_area(path: List[Tuple[float, float, float]]) -> float:
     if not _is_closed(path):
         return 0.0
     x = np.array([p[0] for p in path])
     y = np.array([p[1] for p in path])
+    # Area in XY plane
     return 0.5 * abs(float(np.dot(x[:-1], y[1:]) - np.dot(y[:-1], x[1:])))
 
 
-def _centroid(path: List[Tuple[float, float]]) -> Tuple[float, float]:
+def _centroid(path: List[Tuple[float, float, float]]) -> Tuple[float, float, float]:
     """Compute a polygon centroid; prefers shapely if available, else mean
     of vertices."""
     if not path:
-        return (0.0, 0.0)
+        return (0.0, 0.0, 0.0)
     try:
         import importlib
         import importlib.util
@@ -232,29 +244,34 @@ def _centroid(path: List[Tuple[float, float]]) -> Tuple[float, float]:
         if geom_spec is not None and len(path) >= 3:
             shapely_geometry = importlib.import_module("shapely.geometry")
             Polygon = getattr(shapely_geometry, "Polygon")
-            poly = Polygon(path if _is_closed(path) else (path + [path[0]]))
+            # Use 2D projection for shapely validity check
+            pts_2d = [(p[0], p[1]) for p in path]
+            poly = Polygon(pts_2d if _is_closed(path) else (pts_2d + [pts_2d[0]]))
             if not poly.is_valid:
                 poly = poly.buffer(0)
             c = poly.centroid
-            return (float(c.x), float(c.y))
+            # Return mean Z
+            z_mean = sum(p[2] for p in path) / len(path)
+            return (float(c.x), float(c.y), z_mean)
     except Exception:
         pass
     pts = path[:-1] if _is_closed(path) and len(path) > 1 else path
     ax = float(np.mean([p[0] for p in pts]))
     ay = float(np.mean([p[1] for p in pts]))
-    return (ax, ay)
+    az = float(np.mean([p[2] for p in pts]))
+    return (ax, ay, az)
 
 
 def _translate_path(
-    path: List[Tuple[float, float]], dx: float, dy: float
-) -> List[Tuple[float, float]]:
-    return [(p[0] + dx, p[1] + dy) for p in path]
+    path: List[Tuple[float, float, float]], dx: float, dy: float
+) -> List[Tuple[float, float, float]]:
+    return [(p[0] + dx, p[1] + dy, p[2] if len(p) > 2 else 0.0) for p in path]
 
 
 def _translate_paths(
-    paths: List[List[Tuple[float, float]]], dx: float, dy: float
-) -> List[List[Tuple[float, float]]]:
-    return [[(p[0] + dx, p[1] + dy) for p in poly] for poly in paths]
+    paths: List[List[Tuple[float, float, float]]], dx: float, dy: float
+) -> List[List[Tuple[float, float, float]]]:
+    return [[(p[0] + dx, p[1] + dy, p[2] if len(p) > 2 else 0.0) for p in poly] for poly in paths]
 
 
 def extract_boundary_polygon(msp) -> List[Tuple[float, float]]:
@@ -286,9 +303,7 @@ def extract_boundary_polygon(msp) -> List[Tuple[float, float]]:
 
             def ap(p):
                 # nonlocal pts  # Removed unused declaration
-                if not pts or (
-                    abs(p[0] - pts[-1][0]) > 1e-9 or abs(p[1] - pts[-1][1]) > 1e-9
-                ):
+                if not pts or (abs(p[0] - pts[-1][0]) > 1e-9 or abs(p[1] - pts[-1][1]) > 1e-9):
                     pts.append((float(p[0]), float(p[1])))
 
             for seg in segs:
@@ -341,9 +356,7 @@ def extract_boundary_polygon(msp) -> List[Tuple[float, float]]:
             open_paths.append(_dedup_consecutive(pts))
 
     # If any closed polygons, choose the largest area
-    closed_polys = [
-        p if _is_closed(p) else (p + [p[0]] if p else p) for p in closed_polys
-    ]
+    closed_polys = [p if _is_closed(p) else (p + [p[0]] if p else p) for p in closed_polys]
     closed_polys = [_dedup_consecutive(p) for p in closed_polys if len(p) >= 4]
     if closed_polys:
         return max(closed_polys, key=_polygon_area)
@@ -382,9 +395,7 @@ def extract_boundary_polygon(msp) -> List[Tuple[float, float]]:
             continue
         if (
             not _is_closed(cand_path)
-            and math.hypot(
-                cand_path[0][0] - cand_path[-1][0], cand_path[0][1] - cand_path[-1][1]
-            )
+            and math.hypot(cand_path[0][0] - cand_path[-1][0], cand_path[0][1] - cand_path[-1][1])
             <= 1e-6
         ):
             cand_path = cand_path + [cand_path[0]]
@@ -396,8 +407,8 @@ def extract_boundary_polygon(msp) -> List[Tuple[float, float]]:
 
 
 def sanitize_boundary(
-    boundary: List[Tuple[float, float]], units_to_m: float
-) -> List[Tuple[float, float]]:
+    boundary: List[Tuple[float, float, float]], units_to_m: float
+) -> List[Tuple[float, float, float]]:
     """Ensure boundary is a valid closed exterior ring.
 
     - Closes the ring if needed
@@ -422,7 +433,8 @@ def sanitize_boundary(
         # shapely_ops = importlib.import_module("shapely.ops")  # Unused
         Polygon = getattr(shapely_geometry, "Polygon")
         MultiPolygon = getattr(shapely_geometry, "MultiPolygon", None)
-        poly = Polygon([(x * to_m, y * to_m) for x, y in ring])
+        # Use X, Y for shapely polygon
+        poly = Polygon([(p[0] * to_m, p[1] * to_m) for p in ring])
         if not poly.is_valid:
             poly = poly.buffer(0)
         # If MultiPolygon, pick the largest by area
@@ -435,7 +447,7 @@ def sanitize_boundary(
             return ring
         exterior = list(poly.exterior.coords)
         from_m = 1.0 / to_m
-        return [(float(x) * from_m, float(y) * from_m) for x, y in exterior]
+        return [(float(x) * from_m, float(y) * from_m, 0.0) for x, y in exterior]
     except Exception:
         return ring
 
@@ -463,7 +475,7 @@ def make_offset_path(
     to_m = units_to_m
     if to_m <= 0:
         to_m = 1.0
-    pts_m = [(x * to_m, y * to_m) for x, y in pts]
+    pts_m = [(p[0] * to_m, p[1] * to_m) for p in pts]  # Use X,Y for offset logic
 
     # Mode selection
     if mode.lower() == "scale":
@@ -519,7 +531,7 @@ def make_offset_path(
                 out_m.append(out_m[0])
 
     from_m = 1.0 / to_m
-    return [(x * from_m, y * from_m) for x, y in out_m]
+    return [(x * from_m, y * from_m, 0.0) for x, y in out_m]
 
 
 def compute_bounds(
@@ -528,9 +540,9 @@ def compute_bounds(
     xs: List[float] = []
     ys: List[float] = []
     for poly in paths:
-        for x, y in poly:
-            xs.append(float(x))
-            ys.append(float(y))
+        for p in poly:
+            xs.append(float(p[0]))
+            ys.append(float(p[1]))
     if not xs:
         return 0.0, 0.0, 0.0, 0.0
     return min(xs), min(ys), max(xs), max(ys)
@@ -539,14 +551,11 @@ def compute_bounds(
 def main():
     parser = argparse.ArgumentParser(
         description=(
-            "View a DXF and report shape size, matching Mission 5 transform "
-            "+ offset pipeline"
+            "View a DXF and report shape size, matching Mission 5 transform " "+ offset pipeline"
         )
     )
     parser.add_argument("--file", "-f", type=str, help="Path to DXF file")
-    parser.add_argument(
-        "--save", action="store_true", help="Save a PNG next to the DXF"
-    )
+    parser.add_argument("--save", action="store_true", help="Save a PNG next to the DXF")
     parser.add_argument(
         "--offset",
         type=float,
@@ -558,10 +567,7 @@ def main():
         type=str,
         default="buffer",
         choices=["buffer", "scale"],
-        help=(
-            "Offset mode: buffer (true offset) or scale (uniform scaling "
-            "about centroid)"
-        ),
+        help=("Offset mode: buffer (true offset) or scale (uniform scaling " "about centroid)"),
     )
     parser.add_argument(
         "--join",
@@ -575,8 +581,7 @@ def main():
         type=int,
         default=24,
         help=(
-            "Offset circle approximation resolution (segments per quarter "
-            "circle, default: 24)"
+            "Offset circle approximation resolution (segments per quarter " "circle, default: 24)"
         ),
     )
     parser.add_argument(
@@ -584,10 +589,7 @@ def main():
         type=str,
         default="none",
         choices=["origin", "none"],
-        help=(
-            "Optional viewer-only recentering; Mission 5 does not recenter "
-            "(default: none)"
-        ),
+        help=("Optional viewer-only recentering; Mission 5 does not recenter " "(default: none)"),
     )
     parser.add_argument(
         "--shape-cx",
@@ -612,8 +614,7 @@ def main():
         type=float,
         default=None,
         help=(
-            "Simple mode: scale boundary about origin by this factor; ignores "
-            "mission transforms"
+            "Simple mode: scale boundary about origin by this factor; ignores " "mission transforms"
         ),
     )
     args = parser.parse_args()
@@ -639,12 +640,9 @@ def main():
     units_name, to_m = units_code_to_name_and_scale(insunits)
 
     # Collect paths and bounds
-    paths = collect_2d_paths(msp)
+    paths = collect_paths_3d(msp)
     if not paths:
-        print(
-            "No supported 2D entities found (LINE, LWPOLYLINE, POLYLINE, "
-            "ARC, CIRCLE)."
-        )
+        print("No supported 2D entities found (LINE, LWPOLYLINE, POLYLINE, " "ARC, CIRCLE).")
         return 1
 
     xmin, ymin, xmax, ymax = compute_bounds(paths)
@@ -678,10 +676,13 @@ def main():
 
         def do_transform(pts):
             out = []
-            for x, y in pts:
+            for p in pts:
+                x = p[0]
+                y = p[1]
+                z = p[2] if len(p) > 2 else 0.0
                 xr = x * cos_r - y * sin_r
                 yr = x * sin_r + y * cos_r
-                out.append((xr + args.shape_cx, yr + args.shape_cy))
+                out.append((xr + args.shape_cx, yr + args.shape_cy, z))
             return out
 
         transformed_shape_m = do_transform(boundary_m) if boundary_m else []
@@ -722,19 +723,27 @@ def main():
         except Exception as e:
             print(f"Offset generation failed: {e}")
 
-    fig, ax = plt.subplots(1, 1, figsize=(8, 8))
+    fig = plt.figure(figsize=(10, 8))
+    ax = fig.add_subplot(111, projection="3d")
     for poly in transformed_paths_m:
         if len(poly) >= 2:
             xs_m = [p[0] for p in poly]
             ys_m = [p[1] for p in poly]
+            # Handle potential missing Z in poly if transforms stripped it (need checks)
+            # But we defined everything as 3 tuples now.
+            zs_m = [p[2] if len(p) > 2 else 0.0 for p in poly]
             ax.plot(
                 xs_m,
                 ys_m,
+                zs_m,
                 color="#1f77b4",
                 linewidth=1.5,
                 alpha=0.65,
                 label="All entities" if poly is paths[0] else None,
             )
+    ax.set_xlabel("X (m)")
+    ax.set_ylabel("Y (m)")
+    ax.set_zlabel("Z (m)")
 
     # Highlight boundary and centroid
     b_cent = None

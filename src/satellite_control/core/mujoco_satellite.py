@@ -15,10 +15,12 @@ Features:
 import os
 import time
 from pathlib import Path
-from typing import Dict, List, Optional, Set
+from typing import Any, Dict, List, Optional, Set
 
 import matplotlib.pyplot as plt
 import mujoco
+from typing import Any, List, Optional, Set, Tuple, Union
+from src.satellite_control.utils.orientation_utils import euler_xyz_to_quat_wxyz
 import numpy as np
 from mujoco import viewer as mujoco_viewer
 
@@ -352,13 +354,43 @@ class MuJoCoSatelliteSimulator:
         # w = q[0], z = q[3]
         q = self.quaternion
         # yaw = atan2(2(wz + xy), 1 - 2(y^2 + z^2))
-        return np.arctan2(2 * (q[0] * q[3] + q[1] * q[2]), 1 - 2 * (q[2] ** 2 + q[3] ** 2))
+        return float(np.arctan2(2 * (q[0] * q[3] + q[1] * q[2]), 1 - 2 * (q[2] ** 2 + q[3] ** 2)))
+
+    @angle.setter
+    def angle(self, value: Union[Tuple[float, float, float], np.ndarray]):
+        """
+        Set orientation.
+        Expects (Roll, Pitch, Yaw) in radians.
+        """
+        if not (isinstance(value, (tuple, list, np.ndarray)) and len(value) == 3):
+            raise ValueError("Orientation must be a 3-element Euler tuple (roll, pitch, yaw).")
+
+        quat = euler_xyz_to_quat_wxyz(value)
+        self.data.qpos[3:7] = quat
+
+        mujoco.mj_forward(self.model, self.data)
 
     @property
     def angular_velocity(self) -> np.ndarray:
         """Get current angular velocity [wx, wy, wz] in rad/s."""
         # Free joint: qvel[3:6] is angular velocity
         return self.data.qvel[3:6].copy()
+
+    @angular_velocity.setter
+    def angular_velocity(self, value: Any):
+        """Set angular velocity. If scalar, assumes Z-axis rate."""
+        if np.isscalar(value) or (isinstance(value, np.ndarray) and value.ndim == 0):
+            self.data.qvel[3] = 0.0
+            self.data.qvel[4] = 0.0
+            self.data.qvel[5] = float(value)
+        else:
+            # Assume 3-vector
+            v = np.array(value, dtype=float)
+            if v.shape == (3,):
+                self.data.qvel[3] = v[0]
+                self.data.qvel[4] = v[1]
+                self.data.qvel[5] = v[2]
+        mujoco.mj_forward(self.model, self.data)
 
     def activate_thruster(self, thruster_id: int):
         """Activate a thruster (same interface as SatelliteThrusterTester)."""
@@ -660,7 +692,7 @@ class MuJoCoSatelliteSimulator:
         velocity: np.ndarray,
         quaternion: Optional[np.ndarray] = None,
         angular_velocity: Optional[np.ndarray] = None,
-        angle: float = 0.0,  # Legacy
+        angle: Optional[Tuple[float, float, float]] = None,
     ):
         """Set satellite state directly."""
         # Set position (3D)
@@ -675,11 +707,8 @@ class MuJoCoSatelliteSimulator:
         # Set quaternion (Orientation)
         if quaternion is not None:
             self.data.qpos[3:7] = quaternion
-        elif angle != 0.0:
-            # Convert Z-angle to quat [w, x, y, z]
-            # q = [cos(a/2), 0, 0, sin(a/2)]
-            half = angle / 2.0
-            self.data.qpos[3:7] = [np.cos(half), 0, 0, np.sin(half)]
+        elif angle is not None:
+            self.data.qpos[3:7] = euler_xyz_to_quat_wxyz(angle)
         else:
             # Identity
             self.data.qpos[3:7] = [1, 0, 0, 0]

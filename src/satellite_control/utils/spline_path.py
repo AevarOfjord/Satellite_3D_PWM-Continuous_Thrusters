@@ -104,7 +104,7 @@ class ObstacleAvoidanceSpline:
         alpha = (s - s0) / (s1 - s0)
         return float(t0 + alpha * (t1 - t0))
 
-    def evaluate(self, arc_length: float) -> Tuple[float, float]:
+    def evaluate(self, arc_length: float) -> Tuple[float, ...]:
         """
         Evaluate position at given arc length.
 
@@ -112,13 +112,13 @@ class ObstacleAvoidanceSpline:
             arc_length: Distance along curve from start
 
         Returns:
-            (x, y) position on curve
+            (x, y) or (x, y, z) position on curve
         """
         t = self._arc_length_to_t(arc_length)
         point = self._quadratic_bezier(t)
-        return (float(point[0]), float(point[1]))
+        return tuple(float(x) for x in point)
 
-    def tangent(self, arc_length: float) -> Tuple[float, float]:
+    def tangent(self, arc_length: float) -> Tuple[float, ...]:
         """
         Get normalized tangent direction at given arc length.
 
@@ -126,7 +126,7 @@ class ObstacleAvoidanceSpline:
             arc_length: Distance along curve from start
 
         Returns:
-            (dx, dy) normalized tangent vector
+            (dx, dy) or (dx, dy, dz) normalized tangent vector
         """
         t = self._arc_length_to_t(arc_length)
         deriv = self._quadratic_bezier_derivative(t)
@@ -139,10 +139,11 @@ class ObstacleAvoidanceSpline:
                 direction = self.end - self.control
             norm = np.linalg.norm(direction)
             if norm < 1e-10:
-                return (1.0, 0.0)
-            return (float(direction[0] / norm), float(direction[1] / norm))
+                # Return zero vector of appropriate dimension with 1.0 in x
+                return tuple([1.0] + [0.0] * (len(self.start) - 1))
+            return tuple(float(x / norm) for x in direction)
 
-        return (float(deriv[0] / norm), float(deriv[1] / norm))
+        return tuple(float(x / norm) for x in deriv)
 
     def is_complete(self, arc_length: float) -> bool:
         """Check if arc length has reached end of spline."""
@@ -175,19 +176,24 @@ def create_obstacle_avoidance_spline(
     Returns:
         ObstacleAvoidanceSpline or None if no obstacle in path
     """
-    start = np.array(start_pos[:2])
-    target = np.array(target_pos[:2])
-    obstacle = np.array(obstacle_center[:2])
+    # Determine Z coordinates
+    start_z = start_pos[2] if len(start_pos) > 2 else 0.0
+    target_z = target_pos[2] if len(target_pos) > 2 else 0.0
+
+    # 2D projection for obstacle avoidance
+    start_2d = np.array(start_pos[:2])
+    target_2d = np.array(target_pos[:2])
+    obstacle_2d = np.array(obstacle_center[:2])
 
     # Check if obstacle is actually in the path
     # Project obstacle onto line from start to target
-    path_vec = target - start
+    path_vec = target_2d - start_2d
     path_length = np.linalg.norm(path_vec)
     if path_length < 1e-6:
         return None
 
     path_dir = path_vec / path_length
-    to_obstacle = obstacle - start
+    to_obstacle = obstacle_2d - start_2d
     projection = np.dot(to_obstacle, path_dir)
 
     # Obstacle not between start and target
@@ -195,8 +201,8 @@ def create_obstacle_avoidance_spline(
         return None
 
     # Distance from obstacle to path line
-    closest_on_path = start + projection * path_dir
-    distance_to_path = np.linalg.norm(obstacle - closest_on_path)
+    closest_on_path = start_2d + projection * path_dir
+    distance_to_path = np.linalg.norm(obstacle_2d - closest_on_path)
 
     effective_radius = obstacle_radius + safety_margin
 
@@ -209,14 +215,20 @@ def create_obstacle_avoidance_spline(
     perp = np.array([-path_dir[1], path_dir[0]])
 
     # Determine which side to go around (choose side closer to target)
-    test_point1 = obstacle + perp * effective_radius
-    test_point2 = obstacle - perp * effective_radius
+    test_point1 = obstacle_2d + perp * effective_radius
+    test_point2 = obstacle_2d - perp * effective_radius
 
-    if np.linalg.norm(test_point1 - target) < np.linalg.norm(test_point2 - target):
-        control_point = obstacle + perp * (effective_radius * 1.5)
+    if np.linalg.norm(test_point1 - target_2d) < np.linalg.norm(test_point2 - target_2d):
+        control_point_2d = obstacle_2d + perp * (effective_radius * 1.5)
     else:
-        control_point = obstacle - perp * (effective_radius * 1.5)
+        control_point_2d = obstacle_2d - perp * (effective_radius * 1.5)
 
-    return ObstacleAvoidanceSpline(
-        start=tuple(start), control=tuple(control_point), end=tuple(target)
-    )
+    # Interpolate Z for control point (average Z is a reasonable heuristic for simple avoidance)
+    control_z = (start_z + target_z) / 2.0
+
+    # Construct 3D points
+    start_3d = (start_2d[0], start_2d[1], start_z)
+    end_3d = (target_2d[0], target_2d[1], target_z)
+    control_3d = (control_point_2d[0], control_point_2d[1], control_z)
+
+    return ObstacleAvoidanceSpline(start=start_3d, control=control_3d, end=end_3d)

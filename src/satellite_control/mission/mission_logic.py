@@ -24,7 +24,7 @@ class MissionLogic:
         # Default tolerances could be injected or loaded from config
         pass
 
-    def calculate_path_length(self, points: List[Tuple[float, float]]) -> float:
+    def calculate_path_length(self, points: List[Tuple[float, ...]]) -> float:
         """Calculate total length of path."""
         length = 0.0
         for i in range(len(points) - 1):
@@ -33,33 +33,43 @@ class MissionLogic:
             length += float(np.linalg.norm(p2 - p1))
         return float(length)
 
-    def validate_coordinates(self, input_str: str) -> Optional[Tuple[float, float]]:
+    def validate_coordinates(self, input_str: str) -> Optional[Tuple[float, float, float]]:
         """
-        Parse and validate coordinate string "x, y".
-        Returns tuple (x, y) if valid, None otherwise.
+        Parse and validate coordinate string "x, y" or "x, y, z".
+        Returns tuple (x, y, z) if valid, None otherwise.
         """
         try:
             parts = input_str.replace("(", "").replace(")", "").split(",")
             if len(parts) == 2:
                 x = float(parts[0].strip())
                 y = float(parts[1].strip())
-                return (x, y)
+                return (x, y, 0.0)
+            elif len(parts) == 3:
+                x = float(parts[0].strip())
+                y = float(parts[1].strip())
+                z = float(parts[2].strip())
+                return (x, y, z)
         except (ValueError, IndexError):
             pass
         return None
 
-    def validate_angle(self, input_str: str) -> Optional[float]:
+    def validate_angle(self, input_str: str) -> Optional[Tuple[float, float, float]]:
         """
-        Parse and validate angle string (degrees).
-        Returns angle in radians if valid, None otherwise.
+        Parse and validate 3D Euler angle string (degrees).
+        Returns (roll, pitch, yaw) in radians if valid, None otherwise.
         """
         try:
-            val = float(input_str.strip())
-            return math.radians(val)
+            parts = input_str.replace("(", "").replace(")", "").split(",")
+            if len(parts) != 3:
+                return None
+            roll = math.radians(float(parts[0].strip()))
+            pitch = math.radians(float(parts[1].strip()))
+            yaw = math.radians(float(parts[2].strip()))
+            return (roll, pitch, yaw)
         except ValueError:
             return None
 
-    def generate_demo_shape(self, shape_type: str) -> List[Tuple[float, float]]:
+    def generate_demo_shape(self, shape_type: str) -> List[Tuple[float, float, float]]:
         """
         Get predefined demo shape points.
 
@@ -71,78 +81,74 @@ class MissionLogic:
             # 1m radius circle
             for i in range(37):  # 36 segments + closure
                 angle = math.radians(i * 10)
-                points.append((math.cos(angle), math.sin(angle)))
+                points.append((math.cos(angle), math.sin(angle), 0.0))
 
         elif shape_type == "rectangle":
             # 2x1 rectangle
             points = [
-                (-1.0, -0.5),
-                (1.0, -0.5),
-                (1.0, 0.5),
-                (-1.0, 0.5),
-                (-1.0, -0.5),
+                (-1.0, -0.5, 0.0),
+                (1.0, -0.5, 0.0),
+                (1.0, 0.5, 0.0),
+                (-1.0, 0.5, 0.0),
+                (-1.0, -0.5, 0.0),
             ]
 
         elif shape_type == "triangle":
             # Equilateral triangle
             points = [
-                (0.0, 1.0),
-                (math.cos(math.radians(210)), math.sin(math.radians(210))),
-                (math.cos(math.radians(330)), math.sin(math.radians(330))),
-                (0.0, 1.0),
+                (0.0, 1.0, 0.0),
+                (math.cos(math.radians(210)), math.sin(math.radians(210)), 0.0),
+                (math.cos(math.radians(330)), math.sin(math.radians(330)), 0.0),
+                (0.0, 1.0, 0.0),
             ]
 
         elif shape_type == "hexagon":
             for i in range(7):
                 angle = math.radians(i * 60)
-                points.append((math.cos(angle), math.sin(angle)))
+                points.append((math.cos(angle), math.sin(angle), 0.0))
 
         return points
 
     def transform_shape(
         self,
-        points: List[Tuple[float, float]],
-        center: Tuple[float, float],
+        points: List[Tuple[float, ...]],
+        center: Tuple[float, ...],
         rotation: float,
-    ) -> List[Tuple[float, float]]:
+    ) -> List[Tuple[float, float, float]]:
         """
         Transform shape points to specified center and rotation.
         """
         if not points:
             return []
 
-        # Center centering (assume shape centered at 0,0 or calculate
-        # centroid?) The original treated points as relative to 0,0.
-        # unless they were DXF loaded. For generated shapes, they are around
-        # 0,0.
-
-        # Original implementation calculates centroid to re-center?
-        # Let's trust the input points are defining the shape geometry.
-
-        # However, to typically "move" a shape to a target, we often want
-        # the centroid at target. But if we just rotate and translate,
-        # we are assuming input points are local.
-        # But if we just rotate and translate, we are assuming input points are
-        # local.
+        cx = center[0]
+        cy = center[1]
+        cz = center[2] if len(center) > 2 else 0.0
 
         cos_theta = math.cos(rotation)
         sin_theta = math.sin(rotation)
 
         transformed = []
-        for x, y in points:
-            # Rotate
+        for p in points:
+            x, y = p[0], p[1]
+            z = p[2] if len(p) > 2 else 0.0
+
+            # Rotate (XY plane rotation)
             rot_x = x * cos_theta - y * sin_theta
             rot_y = x * sin_theta + y * cos_theta
+
             # Translate
-            final_x = rot_x + center[0]
-            final_y = rot_y + center[1]
-            transformed.append((final_x, final_y))
+            final_x = rot_x + cx
+            final_y = rot_y + cy
+            final_z = z + cz
+
+            transformed.append((final_x, final_y, final_z))
 
         return transformed
 
     def upscale_shape(
-        self, points: List[Tuple[float, float]], offset_distance: float
-    ) -> List[Tuple[float, float]]:
+        self, points: List[Tuple[float, ...]], offset_distance: float
+    ) -> List[Tuple[float, float, float]]:
         """Create upscaled path at fixed offset from shape using Shapely."""
         if len(points) < 3:
             return points
@@ -189,13 +195,15 @@ class MissionLogic:
 
             # Extract exterior coords
             exterior = list(buffered.exterior.coords)
-            return [(float(x), float(y)) for x, y in exterior]
+            # Re-attach Z=0.0 (or original Z if we tracked it, but shapely is 2D)
+            # For now, assume Z=0.0 for upscaled path
+            return [(float(x), float(y), 0.0) for x, y in exterior]
 
         except Exception as e:
             logger.warning(f" Shapely offset failed in upscale_shape: {e}")
             return points
 
-    def load_dxf_shape(self, file_path: str) -> List[Tuple[float, float]]:
+    def load_dxf_shape(self, file_path: str) -> List[Tuple[float, float, float]]:
         """
         Load shape points from DXF using the same pipeline as DXF_Viewer.
 
@@ -234,7 +242,7 @@ class MissionLogic:
             boundary = extract_boundary_polygon(msp)
             boundary = sanitize_boundary(boundary, to_m)
             boundary_m = (
-                [(float(x) * to_m, float(y) * to_m) for (x, y) in boundary] if boundary else []
+                [(float(x) * to_m, float(y) * to_m, 0.0) for (x, y) in boundary] if boundary else []
             )
 
             if not boundary_m:

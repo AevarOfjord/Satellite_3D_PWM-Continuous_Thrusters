@@ -288,7 +288,7 @@ class SatelliteConfig:
     # ========================================================================
     ENABLE_WAYPOINT_MODE = False
     WAYPOINT_TARGETS: List[Tuple[float, float]] = []
-    WAYPOINT_ANGLES: List[float] = []
+    WAYPOINT_ANGLES: List[Tuple[float, float, float]] = []
     CURRENT_TARGET_INDEX = 0
     MULTI_POINT_PHASE: Optional[str] = None
     TARGET_STABILIZATION_START_TIME = None
@@ -486,6 +486,11 @@ class SatelliteConfig:
         """Backward-compatible alias for enabling waypoint mode."""
         cls.set_waypoint_mode(enable)
 
+    @staticmethod
+    def _format_euler_deg(angle: Tuple[float, float, float]) -> str:
+        roll, pitch, yaw = np.degrees(angle)
+        return f"roll={roll:.1f}°, pitch={pitch:.1f}°, yaw={yaw:.1f}°"
+
     @classmethod
     def set_waypoint_targets(cls, target_points: list, target_angles: list):
         """Set waypoint target points and orientations."""
@@ -502,7 +507,8 @@ class SatelliteConfig:
         print(f"Waypoint mission configured: {num_targets} {target_word}")
         for i, (pos, angle) in enumerate(zip(target_points, target_angles)):
             print(
-                f"  Waypoint {i + 1}: ({pos[0]:.2f}, {pos[1]:.2f}) m, " f"{np.degrees(angle):.1f}°"
+                f"  Waypoint {i + 1}: ({pos[0]:.2f}, {pos[1]:.2f}) m, "
+                f"{cls._format_euler_deg(angle)}"
             )
 
     @classmethod
@@ -536,7 +542,7 @@ class SatelliteConfig:
             print(
                 f"ADVANCING TO WAYPOINT {cls.CURRENT_TARGET_INDEX + 1}: "
                 f"({target_pos[0]:.2f}, {target_pos[1]:.2f}) m, "
-                f"{np.degrees(target_angle):.1f}°"
+                f"{cls._format_euler_deg(target_angle)}"
             )
             return True
 
@@ -655,7 +661,8 @@ class SatelliteConfig:
         print(f"   Moment of inertia:      {cls.MOMENT_OF_INERTIA:.3f} kg·m²")
         print(f"   Satellite size:         {cls.SATELLITE_SIZE:.3f} m")
         print(
-            f"   COM offset:             ({cls.COM_OFFSET[0]:.6f}, " f"{cls.COM_OFFSET[1]:.6f}) m"
+            f"   COM offset:             ({cls.COM_OFFSET[0]:.6f}, "
+            f"{cls.COM_OFFSET[1]:.6f}, {cls.COM_OFFSET[2]:.6f}) m"
         )
 
         # Thruster Configuration

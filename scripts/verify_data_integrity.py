@@ -62,6 +62,14 @@ def verify_csv(file_path, time_col):
                 if abs(norm - 1.0) > 1e-2:
                     print(f"WARNING: Quaternion norm deviation at row {i+2}: {norm}")
 
+            # 3D Check
+            if "Current_Z" in row:
+                try:
+                    z_val = float(row["Current_Z"])
+                except ValueError:
+                    print(f"FAILED: Invalid Z value at row {i+2}")
+                    return False
+
         except ValueError as e:
             print(f"FAILED: Value error at row {i+2} column {time_col}: {e}")
             return False

@@ -98,8 +98,8 @@ class ObstacleManager:
 
     def is_path_clear(
         self,
-        start_pos: Tuple[float, float],
-        end_pos: Tuple[float, float],
+        start_pos: Tuple[float, ...],
+        end_pos: Tuple[float, ...],
         safety_margin: Optional[float] = None,
     ) -> bool:
         """
@@ -119,8 +119,8 @@ class ObstacleManager:
         if safety_margin is None:
             safety_margin = self.safety_margin
 
-        start = np.array(start_pos)
-        end = np.array(end_pos)
+        start = np.array(start_pos)[:2]
+        end = np.array(end_pos)[:2]
 
         for obs_x, obs_y, obs_radius in self.obstacles:
             obs_center = np.array([obs_x, obs_y])

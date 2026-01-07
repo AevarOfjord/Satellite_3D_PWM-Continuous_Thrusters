@@ -138,17 +138,21 @@ class TestTargetStateCalculation:
 
     def test_simple_target_state(self):
         """Test creating a simple target state vector."""
-        # manager = MissionStateManager()  # Not currently used
+        from src.satellite_control.utils.orientation_utils import euler_xyz_to_quat_wxyz
 
-        target_pos = (1.0, 2.0)
-        target_angle = np.pi / 4
+        manager = MissionStateManager()
 
-        # Create target state: [x, y, vx, vy, theta, omega]
-        target_state = np.array([target_pos[0], target_pos[1], 0.0, 0.0, target_angle, 0.0])
+        target_pos = (1.0, 2.0, 0.0)
+        target_angle = (0.0, 0.0, np.pi / 4)
 
+        target_state = manager._create_3d_state(
+            target_pos[0], target_pos[1], target_angle, z=target_pos[2]
+        )
+
+        assert target_state.shape == (13,)
         assert target_state[0] == 1.0
         assert target_state[1] == 2.0
-        assert target_state[4] == np.pi / 4
+        assert np.allclose(target_state[3:7], euler_xyz_to_quat_wxyz(target_angle))
 
 
 class TestMultiPointMission:

@@ -103,19 +103,34 @@ def mpc_params():
 @pytest.fixture
 def zero_state():
     """Provide a zero state vector."""
-    return np.array([0.0, 0.0, 0.0, 0.0, 0.0, 0.0])
+    from src.satellite_control.utils.orientation_utils import euler_xyz_to_quat_wxyz
+
+    state = np.zeros(13)
+    state[3:7] = euler_xyz_to_quat_wxyz((0.0, 0.0, 0.0))
+    return state
 
 
 @pytest.fixture
 def sample_state():
     """Provide a sample non-zero state."""
-    return np.array([1.0, 0.5, np.pi / 4, 0.1, 0.05, 0.1])
+    from src.satellite_control.utils.orientation_utils import euler_xyz_to_quat_wxyz
+
+    state = np.zeros(13)
+    state[0:3] = np.array([1.0, 0.5, 0.2])
+    state[3:7] = euler_xyz_to_quat_wxyz((0.1, -0.2, np.pi / 4))
+    state[7:10] = np.array([0.1, 0.05, -0.02])
+    state[10:13] = np.array([0.0, 0.0, 0.1])
+    return state
 
 
 @pytest.fixture
 def target_state():
     """Provide a typical target state."""
-    return np.array([0.0, 0.0, 0.0, 0.0, 0.0, 0.0])
+    from src.satellite_control.utils.orientation_utils import euler_xyz_to_quat_wxyz
+
+    state = np.zeros(13)
+    state[3:7] = euler_xyz_to_quat_wxyz((0.0, 0.0, 0.0))
+    return state
 
 
 # ============================================================================
@@ -128,7 +143,7 @@ def mock_motion_capture():
     """Provide mock motion capture data."""
     data = MagicMock()
     data.position = (0.0, 0.0)
-    data.orientation = 0.0
+    data.orientation = (0.0, 0.0, 0.0)
     data.timestamp = 0.0
     return data
 

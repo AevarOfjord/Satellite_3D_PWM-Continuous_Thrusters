@@ -7,15 +7,16 @@ def test_headless_physics():
     print("Testing Headless Physics...")
 
     # Configure for movement
-    start_pos = (0.0, 0.0)
-    target_pos = (1.0, 1.0)  # Aim for (1,1)
+    # Configure for movement -- 3D
+    start_pos = (0.0, 0.0, 0.0)
+    target_pos = (1.0, 1.0, 0.0)  # Aim for (1,1,0)
 
     # Initialize simulation in headless mode
     sim = SatelliteMPCLinearizedSimulation(
         start_pos=start_pos,
         target_pos=target_pos,
-        start_angle=0.0,
-        target_angle=0.0,
+        start_angle=(0.0, 0.0, 0.0),
+        target_angle=(0.0, 0.0, 0.0),
         use_mujoco_viewer=False,
     )
 
@@ -40,7 +41,7 @@ def test_headless_physics():
     final_state = sim.get_current_state()
     print(f"\nFinal State: {final_state}")
 
-    dist = np.linalg.norm(final_state[0:2] - np.array(start_pos))
+    dist = np.linalg.norm(final_state[0:3] - np.array(start_pos))
     print(f"Distance moved: {dist:.6f} m")
 
     if dist < 0.001:

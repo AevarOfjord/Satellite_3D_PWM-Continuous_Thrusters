@@ -56,20 +56,25 @@ class SimulationLogger:
 
         # Quat -> Yaw
         q = current_state[3:7]
-        curr_yaw = np.arctan2(2 * (q[0] * q[3] + q[1] * q[2]), 1 - 2 * (q[2] ** 2 + q[3] ** 2))
+        # Quat -> Euler (scipy)
+        from scipy.spatial.transform import Rotation
+
+        q_scipy = [q[1], q[2], q[3], q[0]]  # xyzw for scipy, wxyz input
+        curr_euler = Rotation.from_quat(q_scipy).as_euler("xyz", degrees=False)
+        curr_roll, curr_pitch, curr_yaw = curr_euler
 
         q_t = target_state[3:7]
-        targ_yaw = np.arctan2(
-            2 * (q_t[0] * q_t[3] + q_t[1] * q_t[2]), 1 - 2 * (q_t[2] ** 2 + q_t[3] ** 2)
-        )
+        q_t_scipy = [q_t[1], q_t[2], q_t[3], q_t[0]]
+        targ_euler = Rotation.from_quat(q_t_scipy).as_euler("xyz", degrees=False)
+        targ_roll, targ_pitch, targ_yaw = targ_euler
 
         # Vel
         curr_vx, curr_vy, curr_vz = current_state[7:10]
         targ_vx, targ_vy, targ_vz = target_state[7:10]
 
-        # Ang Vel (Z)
-        curr_wz = current_state[12]
-        targ_wz = target_state[12]
+        # Ang Vel (X, Y, Z)
+        curr_wx, curr_wy, curr_wz = current_state[10:13]
+        targ_wx, targ_wy, targ_wz = target_state[10:13]
 
         # Calculate errors
         error_x = curr_x - targ_x
@@ -134,10 +139,14 @@ class SimulationLogger:
             "Current_Y": curr_y,
             "Current_Z": curr_z,
             "Current_Yaw": curr_yaw,
+            "Current_Roll": curr_roll,
+            "Current_Pitch": curr_pitch,
             "Current_VX": curr_vx,
             "Current_VY": curr_vy,
             "Current_VZ": curr_vz,
-            "Current_Angular_Vel": curr_wz,
+            "Current_WX": curr_wx,
+            "Current_WY": curr_wy,
+            "Current_WZ": curr_wz,
             "Target_X": targ_x,
             "Target_Y": targ_y,
             "Target_Z": targ_z,
@@ -145,7 +154,9 @@ class SimulationLogger:
             "Target_VX": targ_vx,
             "Target_VY": targ_vy,
             "Target_VZ": targ_vz,
-            "Target_Angular_Vel": targ_wz,
+            "Target_WX": targ_wx,
+            "Target_WY": targ_wy,
+            "Target_WZ": targ_wz,
             "Error_X": error_x,
             "Error_Y": error_y,
             "Error_Z": error_z,
@@ -188,15 +199,15 @@ class SimulationLogger:
         Log high-frequency physics data.
         """
         # Extract 3D components
-        curr_x, curr_y = current_state[0:2]
+        curr_x, curr_y, curr_z = current_state[0:3]
 
         q = current_state[3:7]
         curr_yaw = np.arctan2(2 * (q[0] * q[3] + q[1] * q[2]), 1 - 2 * (q[2] ** 2 + q[3] ** 2))
 
-        curr_vx, curr_vy = current_state[7:9]
+        curr_vx, curr_vy, curr_vz = current_state[7:10]
         curr_wz = current_state[12]
 
-        targ_x, targ_y = target_state[0:2]
+        targ_x, targ_y, targ_z = target_state[0:3]
 
         q_t = target_state[3:7]
         targ_yaw = np.arctan2(
@@ -206,6 +217,7 @@ class SimulationLogger:
         # Calculate errors
         error_x = targ_x - curr_x
         error_y = targ_y - curr_y
+        error_z = targ_z - curr_z
 
         raw_yaw_error = targ_yaw - curr_yaw
         if normalize_angle_func:
@@ -221,15 +233,19 @@ class SimulationLogger:
             "Time": f"{simulation_time:.4f}",
             "Current_X": f"{curr_x:.5f}",
             "Current_Y": f"{curr_y:.5f}",
+            "Current_Z": f"{curr_z:.5f}",
             "Current_Yaw": f"{curr_yaw:.5f}",
             "Current_VX": f"{curr_vx:.5f}",
             "Current_VY": f"{curr_vy:.5f}",
+            "Current_VZ": f"{curr_vz:.5f}",
             "Current_Angular_Vel": f"{curr_wz:.5f}",
             "Target_X": f"{targ_x:.5f}",
             "Target_Y": f"{targ_y:.5f}",
+            "Target_Z": f"{targ_z:.5f}",
             "Target_Yaw": f"{targ_yaw:.5f}",
             "Error_X": f"{error_x:.5f}",
             "Error_Y": f"{error_y:.5f}",
+            "Error_Z": f"{error_z:.5f}",
             "Error_Yaw": f"{error_yaw:.5f}",
             "Command_Vector": cmd_vec_str,
         }

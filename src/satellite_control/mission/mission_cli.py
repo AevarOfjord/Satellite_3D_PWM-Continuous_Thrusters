@@ -49,8 +49,8 @@ class MissionCLI:
     def get_user_position(
         self,
         position_type: str,
-        default_pos: Optional[Tuple[float, float]] = None,
-    ) -> Tuple[float, float]:
+        default_pos: Optional[Tuple[float, float, float]] = None,
+    ) -> Tuple[float, float, float]:
         """Get position input from user."""
         while True:
             try:
@@ -64,7 +64,15 @@ class MissionCLI:
                     return default_pos
                 y = float(y_input)
 
-                return (x, y)
+                z_input = input(f"{position_type.title()} Z position (meters): ").strip()
+                if z_input == "" and default_pos is not None:
+                    return default_pos
+                # Default Z to 0.0 if not provided and no default passed,
+                # but logic above returns default_pos if input empty.
+                # If default_pos is None, we need input.
+                z = float(z_input) if z_input else 0.0
+
+                return (x, y, z)
             except ValueError:
                 print("Invalid input. Please enter numeric values.")
                 if default_pos is not None:
@@ -75,21 +83,43 @@ class MissionCLI:
                 raise
 
     def get_user_orientation(
-        self, orientation_type: str, default_angle: Optional[float] = None
-    ) -> float:
-        """Get orientation input from user (degrees)."""
+        self,
+        orientation_type: str,
+        default_angle: Optional[Tuple[float, float, float]] = None,
+    ) -> Tuple[float, float, float]:
+        """Get orientation input from user as 3D Euler angles (degrees)."""
+        default_deg = tuple(np.degrees(default_angle)) if default_angle is not None else None
+
+        def _read_component(label: str, default_rad: Optional[float]) -> float:
+            if default_rad is not None:
+                prompt = (
+                    f"{orientation_type.title()} {label} (degrees, "
+                    f"default {np.degrees(default_rad):.1f}): "
+                )
+            else:
+                prompt = f"{orientation_type.title()} {label} (degrees): "
+            value = input(prompt).strip()
+            if value == "":
+                if default_rad is None:
+                    raise ValueError("Missing value")
+                return float(default_rad)
+            return float(np.radians(float(value)))
+
         while True:
             try:
-                angle_input = input(f"{orientation_type.title()} orientation (degrees): ").strip()
-                if angle_input == "" and default_angle is not None:
-                    return default_angle
-                angle_deg = float(angle_input)
-                return float(np.radians(angle_deg))
+                roll = _read_component("roll", default_angle[0] if default_angle else None)
+                pitch = _read_component("pitch", default_angle[1] if default_angle else None)
+                yaw = _read_component("yaw", default_angle[2] if default_angle else None)
+                return (roll, pitch, yaw)
             except ValueError:
-                print("Invalid input. Please enter a numeric value.")
+                print("Invalid input. Please enter numeric values.")
                 if default_angle is not None:
-                    default_deg = np.degrees(default_angle)
-                    if self._confirm_use_default(f"{default_deg:.1f}°"):
+                    default_label = (
+                        f"roll={default_deg[0]:.1f}°, "
+                        f"pitch={default_deg[1]:.1f}°, "
+                        f"yaw={default_deg[2]:.1f}°"
+                    )
+                    if self._confirm_use_default(default_label):
                         return default_angle
             except KeyboardInterrupt:
                 print("\nCancelled by user.")
@@ -99,31 +129,35 @@ class MissionCLI:
         self,
         default_vx: float = 0.0,
         default_vy: float = 0.0,
+        default_vz: float = 0.0,
         default_omega: float = 0.0,
-    ) -> Tuple[float, float, float]:
+    ) -> Tuple[float, float, float, float]:
         """Get initial velocity values from user input.
 
         Args:
             default_vx: Default X velocity in m/s
             default_vy: Default Y velocity in m/s
-            default_omega: Default angular velocity in rad/s
+            default_vz: Default Z velocity in m/s
+            default_omega: Default angular velocity (Z-axis) in rad/s
 
         Returns:
-            Tuple of (vx, vy, omega) velocities
+            Tuple of (vx, vy, vz, omega) velocities
         """
         while True:
             try:
                 vx_input = input(f"X velocity (m/s, default: {default_vx:.3f}): ").strip()
                 vy_input = input(f"Y velocity (m/s, default: {default_vy:.3f}): ").strip()
+                vz_input = input(f"Z velocity (m/s, default: {default_vz:.3f}): ").strip()
                 omega_input = input(
-                    f"Angular velocity (rad/s, default: {default_omega:.3f}): "
+                    f"Angular velocity Z (rad/s, default: {default_omega:.3f}): "
                 ).strip()
 
                 vx = float(vx_input) if vx_input else default_vx
                 vy = float(vy_input) if vy_input else default_vy
+                vz = float(vz_input) if vz_input else default_vz
                 omega = float(omega_input) if omega_input else default_omega
 
-                return (vx, vy, omega)
+                return (vx, vy, vz, omega)
 
             except ValueError:
                 print("Invalid velocity input. Please enter numeric values.")
@@ -325,18 +359,19 @@ class MissionCLI:
 
             # Configure waypoints
             self._configure_preset_waypoints(
-                start_pos=(1.0, 1.0),
-                start_angle=np.radians(90),
-                targets=[((0.0, 0.0), 0.0)],
+                start_pos=(1.0, 1.0, 0.0),
+                start_angle=(0.0, 0.0, np.radians(90)),
+                targets=[((0.0, 0.0, 0.0), (0.0, 0.0, 0.0))],
             )
 
             return {
                 "mission_type": "waypoint_navigation",
                 "mode": "multi_point",
-                "start_pos": (1.0, 1.0),
-                "start_angle": np.radians(90),
+                "start_pos": (1.0, 1.0, 0.0),
+                "start_angle": (0.0, 0.0, np.radians(90)),
                 "start_vx": 0.0,
                 "start_vy": 0.0,
+                "start_vz": 0.0,
                 "start_omega": 0.0,
             }
 
@@ -353,18 +388,19 @@ class MissionCLI:
 
             # Configure waypoints
             self._configure_preset_waypoints(
-                start_pos=(1.0, 1.0),
-                start_angle=np.radians(45),
-                targets=[((-1.0, -1.0), np.radians(-135))],
+                start_pos=(1.0, 1.0, 0.0),
+                start_angle=(0.0, 0.0, np.radians(45)),
+                targets=[((-1.0, -1.0, 0.0), (0.0, 0.0, np.radians(-135)))],
             )
 
             return {
                 "mission_type": "waypoint_navigation",
                 "mode": "multi_point",
-                "start_pos": (1.0, 1.0),
-                "start_angle": np.radians(45),
+                "start_pos": (1.0, 1.0, 0.0),
+                "start_angle": (0.0, 0.0, np.radians(45)),
                 "start_vx": 0.0,
                 "start_vy": 0.0,
+                "start_vz": 0.0,
                 "start_omega": 0.0,
             }
 
@@ -379,20 +415,25 @@ class MissionCLI:
                 return {}
 
             targets = [
-                ((1.0, 0.0), 0.0),
-                ((1.0, 1.0), np.radians(90)),
-                ((0.0, 1.0), np.radians(180)),
-                ((0.0, 0.0), np.radians(270)),
+                ((1.0, 0.0, 0.0), (0.0, 0.0, 0.0)),
+                ((1.0, 1.0, 0.0), (0.0, 0.0, np.radians(90))),
+                ((0.0, 1.0, 0.0), (0.0, 0.0, np.radians(180))),
+                ((0.0, 0.0, 0.0), (0.0, 0.0, np.radians(270))),
             ]
-            self._configure_preset_waypoints(start_pos=(0.0, 0.0), start_angle=0.0, targets=targets)
+            self._configure_preset_waypoints(
+                start_pos=(0.0, 0.0, 0.0),
+                start_angle=(0.0, 0.0, 0.0),
+                targets=targets,
+            )
 
             return {
                 "mission_type": "waypoint_navigation",
                 "mode": "multi_point",
-                "start_pos": (0.0, 0.0),
-                "start_angle": 0.0,
+                "start_pos": (0.0, 0.0, 0.0),
+                "start_angle": (0.0, 0.0, 0.0),
                 "start_vx": 0.0,
                 "start_vy": 0.0,
+                "start_vz": 0.0,
                 "start_omega": 0.0,
             }
 
@@ -409,18 +450,19 @@ class MissionCLI:
                 return {}
 
             self._configure_preset_waypoints(
-                start_pos=(1.0, 0.0),
-                start_angle=np.radians(180),
-                targets=[((-1.0, 0.0), np.radians(180))],
+                start_pos=(1.0, 0.0, 0.0),
+                start_angle=(0.0, 0.0, np.radians(180)),
+                targets=[((-1.0, 0.0, 0.0), (0.0, 0.0, np.radians(180)))],
             )
 
             return {
                 "mission_type": "waypoint_navigation",
                 "mode": "multi_point",
-                "start_pos": (1.0, 0.0),
-                "start_angle": np.radians(180),
+                "start_pos": (1.0, 0.0, 0.0),
+                "start_angle": (0.0, 0.0, np.radians(180)),
                 "start_vx": 0.0,
                 "start_vy": 0.0,
+                "start_vz": 0.0,
                 "start_omega": 0.0,
             }
 
@@ -429,9 +471,9 @@ class MissionCLI:
 
     def _configure_preset_waypoints(
         self,
-        start_pos: Tuple[float, float],
-        start_angle: float,
-        targets: List[Tuple[Tuple[float, float], float]],
+        start_pos: Tuple[float, float, float],
+        start_angle: Tuple[float, float, float],
+        targets: List[Tuple[Tuple[float, float, float], Tuple[float, float, float]]],
     ) -> None:
         """Configure SatelliteConfig for preset waypoint missions."""
         target_positions = [t[0] for t in targets]
@@ -462,12 +504,12 @@ class MissionCLI:
         print("Define start position and sequence of target waypoints.")
 
         start_pos = self.get_user_position("starting")
-        start_angle = self.get_user_orientation("starting", 0.0)
-        start_vx, start_vy, start_omega = self.get_user_velocities()
+        start_angle = self.get_user_orientation("starting", (0.0, 0.0, 0.0))
+        start_vx, start_vy, start_vz, start_omega = self.get_user_velocities()
 
         # Get targets
-        targets: List[Tuple[float, float]] = []
-        angles = []
+        targets: List[Tuple[float, float, float]] = []
+        angles: List[Tuple[float, float, float]] = []
 
         print("\nDefine Target Waypoints (enter empty X to finish):")
         counter = 1
@@ -484,10 +526,12 @@ class MissionCLI:
                 x = float(x_input)
                 y_input = input(f"Target {counter} Y (meters): ").strip()
                 y = float(y_input) if y_input else 0.0
+                z_input = input(f"Target {counter} Z (meters): ").strip()
+                z = float(z_input) if z_input else 0.0
 
-                angle = self.get_user_orientation(f"Target {counter}", 0.0)
+                angle = self.get_user_orientation(f"Target {counter}", (0.0, 0.0, 0.0))
 
-                targets.append((x, y))
+                targets.append((x, y, z))
                 angles.append(angle)
                 counter += 1
             except ValueError:
@@ -515,5 +559,6 @@ class MissionCLI:
             "start_angle": start_angle,
             "start_vx": start_vx,
             "start_vy": start_vy,
+            "start_vz": start_vz,
             "start_omega": start_omega,
         }

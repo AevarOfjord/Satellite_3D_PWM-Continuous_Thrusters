@@ -59,8 +59,8 @@ class TestSimulationFactory:
         self,
         start_pos: Tuple[float, float] = (0.5, 0.5),
         target_pos: Tuple[float, float] = (0.0, 0.0),
-        start_angle: float = 0.0,
-        target_angle: float = 0.0,
+        start_angle: Tuple[float, float, float] = (0.0, 0.0, 0.0),
+        target_angle: Tuple[float, float, float] = (0.0, 0.0, 0.0),
         config_overrides: Optional[Dict[str, Any]] = None,
         use_mujoco_viewer: bool = False,
     ):
@@ -70,8 +70,8 @@ class TestSimulationFactory:
         Args:
             start_pos: Starting position (x, y) in meters
             target_pos: Target position (x, y) in meters
-            start_angle: Starting angle in radians
-            target_angle: Target angle in radians
+            start_angle: Starting orientation (roll, pitch, yaw) in radians
+            target_angle: Target orientation (roll, pitch, yaw) in radians
             config_overrides: Additional config overrides
             use_mujoco_viewer: Whether to use MuJoCo viewer (default: False)
 
@@ -163,9 +163,9 @@ class TestSimulationFactory:
             MagicMock configured as satellite physics simulator
         """
         mock_sat = MagicMock()
-        mock_sat.position = np.array([0.5, 0.5])
-        mock_sat.velocity = np.array([0.0, 0.0])
-        mock_sat.angle = 0.0
+        mock_sat.position = np.array([0.5, 0.5, 0.0])
+        mock_sat.velocity = np.array([0.0, 0.0, 0.0])
+        mock_sat.angle = (0.0, 0.0, 0.0)
         mock_sat.angular_velocity = 0.0
         mock_sat.dt = 0.005
         mock_sat.external_simulation_mode = True

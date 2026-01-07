@@ -155,35 +155,35 @@ class InteractiveMissionCLI:
         presets = {
             "simple": {
                 "name": "Simple Navigation",
-                "start_pos": (1.0, 1.0),
-                "start_angle": np.radians(90),
-                "targets": [((0.0, 0.0), 0.0)],
+                "start_pos": (1.0, 1.0, 0.0),
+                "start_angle": (0.0, 0.0, np.radians(90)),
+                "targets": [((0.0, 0.0, 0.0), (0.0, 0.0, 0.0))],
                 "obstacles": [],
             },
             "obstacle": {
                 "name": "Obstacle Avoidance",
-                "start_pos": (1.0, 1.0),
-                "start_angle": np.radians(45),
-                "targets": [((-1.0, -1.0), np.radians(-135))],
+                "start_pos": (1.0, 1.0, 0.0),
+                "start_angle": (0.0, 0.0, np.radians(45)),
+                "targets": [((-1.0, -1.0, 0.0), (0.0, 0.0, np.radians(-135)))],
                 "obstacles": [(0.0, 0.0, 0.3)],
             },
             "square": {
                 "name": "Square Pattern",
-                "start_pos": (0.0, 0.0),
-                "start_angle": 0.0,
+                "start_pos": (0.0, 0.0, 0.0),
+                "start_angle": (0.0, 0.0, 0.0),
                 "targets": [
-                    ((1.0, 0.0), 0.0),
-                    ((1.0, 1.0), np.radians(90)),
-                    ((0.0, 1.0), np.radians(180)),
-                    ((0.0, 0.0), np.radians(270)),
+                    ((1.0, 0.0, 0.0), (0.0, 0.0, 0.0)),
+                    ((1.0, 1.0, 0.0), (0.0, 0.0, np.radians(90))),
+                    ((0.0, 1.0, 0.0), (0.0, 0.0, np.radians(180))),
+                    ((0.0, 0.0, 0.0), (0.0, 0.0, np.radians(270))),
                 ],
                 "obstacles": [],
             },
             "corridor": {
                 "name": "Corridor Navigation",
-                "start_pos": (1.0, 0.0),
-                "start_angle": np.radians(180),
-                "targets": [((-1.0, 0.0), np.radians(180))],
+                "start_pos": (1.0, 0.0, 0.0),
+                "start_angle": (0.0, 0.0, np.radians(180)),
+                "targets": [((-1.0, 0.0, 0.0), (0.0, 0.0, np.radians(180)))],
                 "obstacles": [(0.0, 0.5, 0.3), (0.0, -0.5, 0.3)],
             },
         }
@@ -207,6 +207,11 @@ class InteractiveMissionCLI:
             "preset_name": preset_name,
         }
 
+    @staticmethod
+    def _format_euler_deg(euler: Tuple[float, float, float]) -> str:
+        roll, pitch, yaw = np.degrees(euler)
+        return f"roll={roll:.1f}°, pitch={pitch:.1f}°, yaw={yaw:.1f}°"
+
     def _show_mission_preview(self, preset: Dict[str, Any]) -> None:
         """Show a visual preview of the mission configuration."""
         table = Table(title=f"◇ {preset['name']}", style="cyan")
@@ -215,14 +220,23 @@ class InteractiveMissionCLI:
 
         # Start position
         sp = preset["start_pos"]
-        sa = np.degrees(preset["start_angle"])
-        table.add_row("Start Position", f"({sp[0]:.1f}, {sp[1]:.1f}) m")
-        table.add_row("Start Angle", f"{sa:.1f}°")
+        sa = self._format_euler_deg(preset["start_angle"])
+        if len(sp) == 3:
+            table.add_row("Start Position", f"({sp[0]:.1f}, {sp[1]:.1f}, {sp[2]:.1f}) m")
+        else:
+            table.add_row("Start Position", f"({sp[0]:.1f}, {sp[1]:.1f}) m")
+        table.add_row("Start Angle", sa)
 
         # Waypoints
         for i, (pos, angle) in enumerate(preset["targets"], 1):
-            a_deg = np.degrees(angle)
-            table.add_row(f"Waypoint {i}", f"({pos[0]:.1f}, {pos[1]:.1f}) m @ {a_deg:.1f}°")
+            a_deg = self._format_euler_deg(angle)
+            if len(pos) == 3:
+                table.add_row(
+                    f"Waypoint {i}",
+                    f"({pos[0]:.1f}, {pos[1]:.1f}, {pos[2]:.1f}) m @ {a_deg}",
+                )
+            else:
+                table.add_row(f"Waypoint {i}", f"({pos[0]:.1f}, {pos[1]:.1f}) m @ {a_deg}")
 
         # Obstacles
         if preset["obstacles"]:
@@ -273,44 +287,78 @@ class InteractiveMissionCLI:
     def get_position_interactive(
         self,
         prompt: str,
-        default: Tuple[float, float] = (0.0, 0.0),
-    ) -> Tuple[float, float]:
+        default: Tuple[float, ...] = (0.0, 0.0, 0.0),
+        dim: int = 3,
+    ) -> Tuple[float, ...]:
         """Get position with interactive validation."""
         console.print(f"\n[bold]{prompt}[/bold]")
 
+        def_x = default[0] if len(default) > 0 else 0.0
+        def_y = default[1] if len(default) > 1 else 0.0
+        def_z = default[2] if len(default) > 2 else 0.0
+
         x = questionary.text(
-            f"X position (meters) [{default[0]:.2f}]:",
-            default=str(default[0]),
+            f"X position (meters) [{def_x:.2f}]:",
+            default=str(def_x),
             validate=lambda x: self._validate_float(x),
             style=MISSION_STYLE,
             qmark=QMARK,
         ).ask()
 
         y = questionary.text(
-            f"Y position (meters) [{default[1]:.2f}]:",
-            default=str(default[1]),
+            f"Y position (meters) [{def_y:.2f}]:",
+            default=str(def_y),
             validate=lambda x: self._validate_float(x),
             style=MISSION_STYLE,
             qmark=QMARK,
         ).ask()
 
-        return (float(x or default[0]), float(y or default[1]))
+        if dim == 3:
+            z = questionary.text(
+                f"Z position (meters) [{def_z:.2f}]:",
+                default=str(def_z),
+                validate=lambda x: self._validate_float(x),
+                style=MISSION_STYLE,
+                qmark=QMARK,
+            ).ask()
+            return (float(x or def_x), float(y or def_y), float(z or def_z))
+
+        return (float(x or def_x), float(y or def_y))
 
     def get_angle_interactive(
         self,
         prompt: str,
-        default_deg: float = 0.0,
-    ) -> float:
-        """Get angle with interactive validation."""
-        result = questionary.text(
-            f"{prompt} (degrees) [{default_deg:.1f}]:",
-            default=str(default_deg),
+        default_deg: Tuple[float, float, float] = (0.0, 0.0, 0.0),
+    ) -> Tuple[float, float, float]:
+        """Get 3D Euler angles with interactive validation."""
+        roll_default, pitch_default, yaw_default = default_deg
+        roll = questionary.text(
+            f"{prompt} roll (degrees) [{roll_default:.1f}]:",
+            default=str(roll_default),
+            validate=lambda x: self._validate_float(x),
+            style=MISSION_STYLE,
+            qmark=QMARK,
+        ).ask()
+        pitch = questionary.text(
+            f"{prompt} pitch (degrees) [{pitch_default:.1f}]:",
+            default=str(pitch_default),
+            validate=lambda x: self._validate_float(x),
+            style=MISSION_STYLE,
+            qmark=QMARK,
+        ).ask()
+        yaw = questionary.text(
+            f"{prompt} yaw (degrees) [{yaw_default:.1f}]:",
+            default=str(yaw_default),
             validate=lambda x: self._validate_float(x),
             style=MISSION_STYLE,
             qmark=QMARK,
         ).ask()
 
-        return float(np.radians(float(result or default_deg)))
+        return (
+            float(np.radians(float(roll or roll_default))),
+            float(np.radians(float(pitch or pitch_default))),
+            float(np.radians(float(yaw or yaw_default))),
+        )
 
     def configure_obstacles_interactive(self) -> None:
         """Configure obstacles with interactive menu."""
@@ -365,7 +413,7 @@ class InteractiveMissionCLI:
             if not add_more:
                 break
 
-            pos = self.get_position_interactive("Obstacle position")
+            pos = self.get_position_interactive("Obstacle position", dim=2)
             radius = questionary.text(
                 "Radius (meters) [0.3]:",
                 default="0.3",
@@ -384,12 +432,12 @@ class InteractiveMissionCLI:
         # Get start position
         start_pos = self.get_position_interactive(
             "Starting Position",
-            default=(1.0, 1.0),
+            default=(1.0, 1.0, 0.0),
         )
-        start_angle = self.get_angle_interactive("Starting Angle", 0.0)
+        start_angle = self.get_angle_interactive("Starting Angle", (0.0, 0.0, 0.0))
 
         # Get waypoints
-        waypoints: List[Tuple[Tuple[float, float], float]] = []
+        waypoints: List[Tuple[Tuple[float, float], Tuple[float, float, float]]] = []
 
         console.print("\n[bold]Define waypoints[/bold] (at least 1 required)")
 
@@ -397,8 +445,10 @@ class InteractiveMissionCLI:
             wp_num = len(waypoints) + 1
             console.print(f"\n[cyan]Waypoint {wp_num}[/cyan]")
 
-            pos = self.get_position_interactive(f"Target {wp_num}", (0.0, 0.0))
-            angle = self.get_angle_interactive(f"Target {wp_num} angle", 0.0)
+            pos = self.get_position_interactive(f"Target {wp_num}", (0.0, 0.0, 0.0))
+            angle = self.get_angle_interactive(
+                f"Target {wp_num} angle", (0.0, 0.0, 0.0)
+            )
 
             waypoints.append((pos, angle))
 
@@ -442,8 +492,8 @@ class InteractiveMissionCLI:
     def _show_custom_mission_summary(
         self,
         start_pos: Tuple[float, float],
-        start_angle: float,
-        waypoints: List[Tuple[Tuple[float, float], float]],
+        start_angle: Tuple[float, float, float],
+        waypoints: List[Tuple[Tuple[float, float], Tuple[float, float, float]]],
     ) -> None:
         """Show summary of custom mission configuration."""
         table = Table(title="◇ Mission Summary", style="green")
@@ -451,12 +501,20 @@ class InteractiveMissionCLI:
         table.add_column("Value", style="cyan")
 
         sp = start_pos
-        sa = np.degrees(start_angle)
-        table.add_row("Start", f"({sp[0]:.2f}, {sp[1]:.2f}) @ {sa:.1f}°")
+        sa = self._format_euler_deg(start_angle)
+        if len(sp) == 3:
+            table.add_row("Start", f"({sp[0]:.2f}, {sp[1]:.2f}, {sp[2]:.2f}) @ {sa}")
+        else:
+            table.add_row("Start", f"({sp[0]:.2f}, {sp[1]:.2f}) @ {sa}")
 
         for i, (pos, angle) in enumerate(waypoints, 1):
-            a_deg = np.degrees(angle)
-            table.add_row(f"Waypoint {i}", f"({pos[0]:.2f}, {pos[1]:.2f}) @ {a_deg:.1f}°")
+            a_deg = self._format_euler_deg(angle)
+            if len(pos) == 3:
+                table.add_row(
+                    f"Waypoint {i}", f"({pos[0]:.2f}, {pos[1]:.2f}, {pos[2]:.2f}) @ {a_deg}"
+                )
+            else:
+                table.add_row(f"Waypoint {i}", f"({pos[0]:.2f}, {pos[1]:.2f}) @ {a_deg}")
 
         obstacles = SatelliteConfig.get_obstacles()
         if obstacles:
@@ -501,8 +559,8 @@ class InteractiveMissionCLI:
         console.print("[dim]Track a moving target along a shape path[/dim]\n")
 
         # Get start position
-        start_pos = self.get_position_interactive("Starting Position", default=(1.0, 1.0))
-        start_angle = self.get_angle_interactive("Starting Angle", 90.0)
+        start_pos = self.get_position_interactive("Starting Position", default=(1.0, 1.0, 0.0))
+        start_angle = self.get_angle_interactive("Starting Angle", (0.0, 0.0, 90.0))
 
         # Select shape type
         console.print()
@@ -511,7 +569,7 @@ class InteractiveMissionCLI:
             return {}
 
         # Get shape parameters
-        shape_center = self.get_position_interactive("Shape Center", default=(0.0, 0.0))
+        shape_center = self.get_position_interactive("Shape Center", default=(0.0, 0.0, 0.0))
 
         rotation_deg = float(
             questionary.text(
@@ -765,7 +823,7 @@ class InteractiveMissionCLI:
     def _show_shape_mission_summary(
         self,
         start_pos: Tuple[float, float],
-        start_angle: float,
+        start_angle: Tuple[float, float, float],
         shape_type: str,
         shape_center: Tuple[float, float],
         rotation_deg: float,
@@ -781,8 +839,8 @@ class InteractiveMissionCLI:
         table.add_column("Parameter", style="bold")
         table.add_column("Value", style="cyan")
 
-        sa = np.degrees(start_angle)
-        table.add_row("Start", f"({start_pos[0]:.1f}, {start_pos[1]:.1f}) @ {sa:.0f}°")
+        sa = self._format_euler_deg(start_angle)
+        table.add_row("Start", f"({start_pos[0]:.1f}, {start_pos[1]:.1f}) @ {sa}")
         table.add_row("Shape", shape_type.title())
         table.add_row("Center", f"({shape_center[0]:.1f}, {shape_center[1]:.1f})")
         table.add_row("Rotation", f"{rotation_deg:.0f}°")
@@ -799,7 +857,7 @@ class InteractiveMissionCLI:
     def _apply_shape_config(
         self,
         start_pos: Tuple[float, float],
-        start_angle: float,
+        start_angle: Tuple[float, float, float],
         shape_center: Tuple[float, float],
         rotation_rad: float,
         transformed_shape: List[Tuple[float, float]],
@@ -809,7 +867,7 @@ class InteractiveMissionCLI:
         estimated_duration: float,
         has_return: bool,
         return_pos: Optional[Tuple[float, float]],
-        return_angle: Optional[float],
+        return_angle: Optional[Tuple[float, float, float]],
     ) -> None:
         """Apply shape following configuration to SatelliteConfig."""
         SatelliteConfig.DEFAULT_START_POS = start_pos

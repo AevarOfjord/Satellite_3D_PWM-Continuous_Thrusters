@@ -25,9 +25,9 @@ class TestMPCControllerInitialization:
         satellite_params: Dict[str, Any] = {
             "mass": 10.0,
             "inertia": 0.1,
-            "com_offset": (0.0, 0.0),
-            "thruster_positions": {i: (0.1, 0.0) for i in range(1, 9)},
-            "thruster_directions": {i: (1.0, 0.0) for i in range(1, 9)},
+            "com_offset": (0.0, 0.0, 0.0),
+            "thruster_positions": {i: (0.1, 0.0, 0.0) for i in range(1, 9)},
+            "thruster_directions": {i: (1.0, 0.0, 0.0) for i in range(1, 9)},
             "thruster_forces": {i: 1.0 for i in range(1, 9)},
             "damping_linear": 0.0,
             "damping_angular": 0.0,
@@ -61,8 +61,8 @@ class TestMPCControllerInitialization:
         assert mpc.moment_of_inertia == 0.1
         assert mpc.N == 10  # Prediction horizon
         assert mpc.dt == 0.1
-        assert mpc.nx == 6  # State dimension
-        assert mpc.nu == 8  # Control dimension
+        assert mpc.nx == 13  # State dimension
+        assert mpc.nu == 12  # Control dimension
 
         # Check OSQP initialization
         assert mpc.prob is not None
@@ -73,17 +73,17 @@ class TestMPCControllerInitialization:
         satellite_params: Dict[str, Any] = {
             "mass": 10.0,
             "inertia": 0.1,
-            "com_offset": (0.0, 0.0),
-            "thruster_positions": {1: (0.1, 0.0)},
-            "thruster_directions": {1: (0.0, 1.0)},  # firing Y+ at X+ -> Torque +
+            "com_offset": (0.0, 0.0, 0.0),
+            "thruster_positions": {1: (0.1, 0.0, 0.0)},
+            "thruster_directions": {1: (0.0, 1.0, 0.0)},  # firing Y+ at X+ -> Torque +
             "thruster_forces": {1: 1.0},
             "damping_linear": 0.0,
             "damping_angular": 0.0,
         }
         # fill remaining thrusters with dummies to pass strict validation if needed
         for i in range(2, 9):
-            satellite_params["thruster_positions"][i] = (0.0, 0.0)
-            satellite_params["thruster_directions"][i] = (1.0, 0.0)
+            satellite_params["thruster_positions"][i] = (0.0, 0.0, 0.0)
+            satellite_params["thruster_directions"][i] = (1.0, 0.0, 0.0)
             satellite_params["thruster_forces"][i] = 0.0
 
         mpc_params = {
@@ -109,7 +109,7 @@ class TestMPCControllerInitialization:
         # T1 at (0.1, 0) pointing (0, 1) -> force (0, 1)
         # Torque = r x F = 0.1*1 - 0*0 = 0.1
         assert mpc.body_frame_forces[0, 1] == pytest.approx(1.0)
-        assert mpc.thruster_torques[0] == pytest.approx(0.1)
+        assert mpc.body_frame_torques[0, 2] == pytest.approx(0.1)
 
 
 class TestLinearization:
@@ -119,14 +119,15 @@ class TestLinearization:
         """Test A matrix structure."""
         mpc = MPCController()  # Use defaults if allowed or Minimal setup
 
-        x = np.zeros(6)
+        x = np.zeros(13)
+        x[3] = 1.0
         A, B = mpc.linearize_dynamics(x)
 
         # A should be I + dt conversion
         assert A[0, 0] == 1.0
-        assert A[0, 3] == mpc.dt
-        assert A.shape == (6, 6)
-        assert B.shape == (6, 8)
+        assert A[0, 7] == mpc.dt
+        assert A.shape == (13, 13)
+        assert B.shape == (13, 12)
 
 
 class TestControlAction:
@@ -156,8 +157,10 @@ class TestControlAction:
 
         mpc.prob.solve.return_value = mock_res
 
-        x_curr = np.zeros(6)
-        x_target = np.zeros(6)
+        x_curr = np.zeros(13)
+        x_target = np.zeros(13)
+        x_curr[3] = 1.0
+        x_target[3] = 1.0
 
         u, info = mpc.get_control_action(x_curr, x_target)
 

@@ -20,6 +20,7 @@ from typing import (
     Optional,
     Protocol,
     Tuple,
+    Union,
     runtime_checkable,
 )
 
@@ -69,10 +70,10 @@ class MotionController(Protocol):
         Compute optimal control action.
 
         Args:
-            x_current: Current state [x, y, vx, vy, theta, omega]
-            x_target: Target state [x, y, vx, vy, theta, omega]
+            x_current: Current state [x, y, z, qw, qx, qy, qz, vx, vy, vz, wx, wy, wz]
+            x_target: Target state [x, y, z, qw, qx, qy, qz, vx, vy, vz, wx, wy, wz]
             previous_thrusters: Previous control action for switching cost
-            x_target_trajectory: Optional trajectory of targets (N+1, 6)
+            x_target_trajectory: Optional trajectory of targets (N+1, 13)
 
         Returns:
             Tuple of (control_action, info_dict)
@@ -119,20 +120,22 @@ class PhysicsSimulator(Protocol):
     def velocity(self, value: NDArray[np.floating]) -> None: ...
 
     @property
-    def angle(self) -> float:
-        """Current angle (theta) in radians."""
+    def angle(self) -> NDArray[np.floating]:
+        """Current orientation (implementation-defined)."""
         ...
 
     @angle.setter
-    def angle(self, value: float) -> None: ...
+    def angle(self, value: Union[NDArray[np.floating], Tuple[float, float, float]]) -> None: ...
 
     @property
-    def angular_velocity(self) -> float:
-        """Current angular velocity (omega) in rad/s."""
+    def angular_velocity(self) -> NDArray[np.floating]:
+        """Current angular velocity (omega vector [x, y, z]) or scalar."""
         ...
 
     @angular_velocity.setter
-    def angular_velocity(self, value: float) -> None: ...
+    def angular_velocity(
+        self, value: Union[float, NDArray[np.floating], Tuple[float, ...]]
+    ) -> None: ...
 
     @property
     def dt(self) -> float:
@@ -153,7 +156,7 @@ class PhysicsSimulator(Protocol):
         Set thrust level for a specific thruster.
 
         Args:
-            thruster_id: Thruster index (0-7)
+            thruster_id: Thruster index (1-12)
             level: Thrust level (0.0 to 1.0)
         """
         ...
@@ -165,7 +168,7 @@ class PhysicsSimulator(Protocol):
         Calculate net force and torque from active thrusters.
 
         Returns:
-            Tuple of (net_force [fx, fy], net_torque)
+            Tuple of (net_force [fx, fy, fz], net_torque [tx, ty, tz])
         """
         ...
 
@@ -234,7 +237,7 @@ class MissionLogic(Protocol):
     def update_target_state(
         self,
         current_position: NDArray[np.floating],
-        current_angle: float,
+        current_quat: NDArray[np.floating],
         current_time: float,
         current_state: NDArray[np.floating],
     ) -> Optional[NDArray[np.floating]]:
@@ -242,10 +245,10 @@ class MissionLogic(Protocol):
         Update target state based on current position and mission logic.
 
         Args:
-            current_position: Current [x, y] position
-            current_angle: Current angle in radians
+            current_position: Current [x, y, z] position
+            current_quat: Current orientation quaternion [w, x, y, z]
             current_time: Current simulation time
-            current_state: Full state vector [x, y, vx, vy, theta, omega]
+            current_state: Full state vector [pos(3), quat(4), vel(3), w(3)]
 
         Returns:
             New target state or None if mission complete
@@ -271,7 +274,7 @@ class MissionLogic(Protocol):
             external_target_state: Optional override target
 
         Returns:
-            Trajectory array (horizon+1, 6) or None
+            Trajectory array (horizon+1, 13) or None
         """
         ...
 

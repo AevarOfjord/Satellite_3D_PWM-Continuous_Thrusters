@@ -438,7 +438,7 @@ class SimulationVisualizationManager:
         )
 
         rotated_corners = np.array([rotation_matrix @ corner for corner in square_corners])
-        translated_corners = rotated_corners + self.satellite.position
+        translated_corners = rotated_corners + self.satellite.position[:2]
 
         satellite_patch = patches.Polygon(
             translated_corners,
@@ -452,7 +452,7 @@ class SimulationVisualizationManager:
 
         # Draw thrusters with color coding
         for thruster_id, local_pos in self.satellite.thrusters.items():
-            global_pos = rotation_matrix @ np.array(local_pos) + self.satellite.position
+            global_pos = rotation_matrix @ np.array(local_pos)[:2] + self.satellite.position[:2]
             color = self.satellite.thruster_colors[thruster_id]
             is_active = thruster_id in self.satellite.active_thrusters
 
@@ -628,8 +628,8 @@ class SimulationVisualizationManager:
     def reset_simulation(self):
         """Reset simulation to initial state."""
         # Reset satellite state to initial values
-        initial_pos = getattr(self, "initial_start_pos", (0.0, 0.0))
-        initial_angle = getattr(self, "initial_start_angle", 0.0)
+        initial_pos = getattr(self, "initial_start_pos", (0.0, 0.0, 0.0))
+        initial_angle = getattr(self, "initial_start_angle", (0.0, 0.0, 0.0))
         self.satellite.position = np.array(initial_pos)
         self.satellite.velocity = np.array([0.0, 0.0])
         self.satellite.angle = initial_angle

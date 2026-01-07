@@ -74,6 +74,10 @@ from src.satellite_control.utils.navigation_utils import (
     normalize_angle,
     point_to_line_distance,
 )
+from src.satellite_control.utils.orientation_utils import (
+    euler_xyz_to_quat_wxyz,
+    quat_angle_error,
+)
 from src.satellite_control.utils.simulation_state_validator import (
     create_state_validator_from_config,
 )
@@ -117,11 +121,12 @@ class SatelliteMPCLinearizedSimulation:
     def __init__(
         self,
         start_pos: Optional[Tuple[float, float]] = None,
-        target_pos: Optional[Tuple[float, float]] = None,
-        start_angle: Optional[float] = None,
-        target_angle: Optional[float] = None,
+        target_pos: Optional[Tuple[float, ...]] = None,
+        start_angle: Optional[Tuple[float, float, float]] = None,
+        target_angle: Optional[Tuple[float, float, float]] = None,
         start_vx: float = 0.0,
         start_vy: float = 0.0,
+        start_vz: float = 0.0,
         start_omega: float = 0.0,
         config: Optional[StructuredConfig] = None,
         config_overrides: Optional[Dict[str, Dict[str, Any]]] = None,
@@ -133,11 +138,12 @@ class SatelliteMPCLinearizedSimulation:
         Args:
             start_pos: Starting position coords (uses Config default if None)
             target_pos: Target position coords (uses Config default if None)
-            start_angle: Starting angle in radians (Config default if None)
-            target_angle: Target angle in radians (Config default if None)
+            start_angle: Starting orientation in radians (roll, pitch, yaw)
+            target_angle: Target orientation in radians (roll, pitch, yaw)
             start_vx: Initial X velocity in m/s (default: 0.0)
             start_vy: Initial Y velocity in m/s (default: 0.0)
-            start_omega: Initial angular velocity in rad/s (default: 0.0)
+            start_vz: Initial Z velocity in m/s (default: 0.0)
+            start_omega: Initial angular velocity (Z-spin) in rad/s (default: 0.0)
             config: Optional structured config snapshot to run against
             config_overrides: Nested override dict for build_structured_config
             use_mujoco_viewer: If True, use MuJoCo viewer (default: True)
@@ -154,17 +160,19 @@ class SatelliteMPCLinearizedSimulation:
                 target_angle,
                 start_vx,
                 start_vy,
+                start_vz,
                 start_omega,
             )
 
     def _initialize_from_active_config(
         self,
-        start_pos: Optional[Tuple[float, float]],
-        target_pos: Optional[Tuple[float, float]],
-        start_angle: Optional[float],
-        target_angle: Optional[float],
+        start_pos: Optional[Tuple[float, ...]],
+        target_pos: Optional[Tuple[float, ...]],
+        start_angle: Optional[Tuple[float, float, float]],
+        target_angle: Optional[Tuple[float, float, float]],
         start_vx: float = 0.0,
         start_vy: float = 0.0,
+        start_vz: float = 0.0,
         start_omega: float = 0.0,
     ) -> None:
         if start_pos is None:
@@ -180,24 +188,34 @@ class SatelliteMPCLinearizedSimulation:
         self.satellite.external_simulation_mode = True
 
         # Set initial state (including velocities)
-        self.satellite.position = np.array(start_pos, dtype=np.float64)
-        self.satellite.velocity = np.array([start_vx, start_vy], dtype=np.float64)
+        # Ensure start_pos is 3D
+        sp = np.array(start_pos, dtype=np.float64)
+        if sp.shape == (2,):
+            sp = np.pad(sp, (0, 1), "constant")
+        self.satellite.position = sp
+
+        self.satellite.velocity = np.array([start_vx, start_vy, start_vz], dtype=np.float64)
         self.satellite.angle = start_angle
-        self.satellite.angular_velocity = start_omega
+        # Type ignore: Property setter accepts float, getter returns ndarray
+        self.satellite.angular_velocity = start_omega  # type: ignore
 
         # Store initial starting position and angle for reset functionality
-        self.initial_start_pos = np.array(start_pos, dtype=np.float64)
+        self.initial_start_pos = sp.copy()
         self.initial_start_angle = start_angle
 
         # Point-to-point mode (3D State: [p(3), q(4), v(3), w(3)])
         # Target State
         self.target_state = np.zeros(13)
-        self.target_state[0:2] = target_pos  # x, y
-        self.target_state[2] = 0.0  # z
-        # Target Orientation (Z-rotation)
-        half_theta = target_angle / 2.0
-        self.target_state[3] = np.cos(half_theta)  # w
-        self.target_state[6] = np.sin(half_theta)  # z (qx=qy=0)
+
+        # Robust 3D target assignment
+        tp = np.array(target_pos, dtype=np.float64)
+        if tp.shape == (2,):
+            tp = np.pad(tp, (0, 1), "constant")
+        self.target_state[0:3] = tp
+
+        # Target Orientation (3D Euler -> Quaternion)
+        target_quat = euler_xyz_to_quat_wxyz(target_angle)
+        self.target_state[3:7] = target_quat
         # Velocities = 0
 
         logger.info(
@@ -328,14 +346,15 @@ class SatelliteMPCLinearizedSimulation:
 
         logger.info("Linearized MPC Simulation initialized:")
         logger.info("INFO: Formulation: A*x[k] + B*u[k] (Linearized Dynamics)")
-        logger.info(
-            f"INFO: Start: ({start_pos[0]:.2f}, {start_pos[1]:.2f}) m, "
-            f"{np.degrees(start_angle):.1f}°"
-        )
-        logger.info(
-            f"INFO: Target: ({target_pos[0]:.2f}, {target_pos[1]:.2f}) m, "
-            f"{np.degrees(target_angle):.1f}°"
-        )
+        def _format_euler_deg(euler: Tuple[float, float, float]) -> str:
+            roll, pitch, yaw = np.degrees(euler)
+            return f"roll={roll:.1f}°, pitch={pitch:.1f}°, yaw={yaw:.1f}°"
+
+        s_ang_str = _format_euler_deg(start_angle)
+        t_ang_str = _format_euler_deg(target_angle)
+
+        logger.info(f"INFO: Start: {start_pos} m, {s_ang_str}")
+        logger.info(f"INFO: Target: {target_pos} m, {t_ang_str}")
         logger.info(f"INFO: Control update rate: " f"{1 / self.control_update_interval:.1f} Hz")
         logger.info(f"INFO: Prediction horizon: {app_config.mpc.prediction_horizon}")
         logger.info(f"INFO: Control horizon: {app_config.mpc.control_horizon}")
@@ -401,7 +420,7 @@ class SatelliteMPCLinearizedSimulation:
         Delegates to SimulationStateValidator for noise application.
 
         Args:
-            true_state: True state [x, y, vx, vy, theta, omega]
+            true_state: True state [x, y, z, qw, qx, qy, qz, vx, vy, vz, wx, wy, wz]
 
         Returns:
             Noisy state with measurement errors added
@@ -507,7 +526,7 @@ class SatelliteMPCLinearizedSimulation:
         current_state = self.get_current_state()
 
         # Get target state (handle if not set)
-        target_state = self.target_state if self.target_state is not None else np.zeros(6)
+        target_state = self.target_state if self.target_state is not None else np.zeros(13)
 
         # Delegate to SimulationLogger
         if not hasattr(self, "physics_logger_helper"):
@@ -584,7 +603,7 @@ class SatelliteMPCLinearizedSimulation:
         Replaces ~330 lines of complex nested code with clean delegation.
 
         Args:
-            current_state: Current state vector [x, y, vx, vy, theta, omega]
+            current_state: Current state vector [x, y, z, qw, qx, qy, qz, vx, vy, vz, wx, wy, wz]
         """
         # Track target index to detect waypoint advances
         prev_target_index = getattr(SatelliteConfig, "CURRENT_TARGET_INDEX", 0)
@@ -592,7 +611,7 @@ class SatelliteMPCLinearizedSimulation:
         # Delegate to MissionStateManager for centralized mission logic
         target_state = self.mission_manager.update_target_state(
             current_position=self.satellite.position,
-            current_angle=self.satellite.angle,
+            current_quat=self.satellite.quaternion,
             current_time=self.simulation_time,
             current_state=current_state,
         )
@@ -624,8 +643,15 @@ class SatelliteMPCLinearizedSimulation:
             if self.target_state is not None and getattr(
                 SatelliteConfig, "ENABLE_WAYPOINT_MODE", False
             ):
-                pos_change = np.linalg.norm(target_state[:2] - self.target_state[:2])
-                ang_change = abs(self.angle_difference(target_state[4], self.target_state[4]))
+                # 3D Position Change
+                pos_change = np.linalg.norm(target_state[:3] - self.target_state[:3])
+
+                # 3D Angle Change (Quaternion)
+                q1 = target_state[3:7]
+                q2 = self.target_state[3:7]
+                dot = np.abs(np.dot(q1, q2))
+                dot = min(1.0, max(-1.0, dot))
+                ang_change = 2.0 * np.arccos(dot)
 
                 if pos_change > 1e-4 or ang_change > 1e-4:
                     if self.target_reached_time is not None:
@@ -717,11 +743,7 @@ class SatelliteMPCLinearizedSimulation:
             pos_error = np.linalg.norm(current_state[:3] - self.target_state[:3])
 
             # Quaternion error: 2 * arccos(|<q1, q2>|)
-            q1 = current_state[3:7]
-            q2 = self.target_state[3:7]
-            dot = np.abs(np.dot(q1, q2))
-            dot = min(1.0, max(-1.0, dot))
-            ang_error = 2.0 * np.arccos(dot)
+            ang_error = quat_angle_error(self.target_state[3:7], current_state[3:7])
 
             # Determine status message
             status_msg = f"Traveling to Target (t={self.simulation_time:.1f}s)"
@@ -867,9 +889,9 @@ class SatelliteMPCLinearizedSimulation:
                     # Update maintenance tracking
                     self.target_maintenance_time = self.simulation_time - self.target_reached_time
                     current_state = self.get_current_state()
-                    pos_error = np.linalg.norm(current_state[:2] - self.target_state[:2])
-                    ang_error = abs(
-                        self.angle_difference(float(self.target_state[4]), float(current_state[4]))
+                    pos_error = np.linalg.norm(current_state[:3] - self.target_state[:3])
+                    ang_error = quat_angle_error(
+                        self.target_state[3:7], current_state[3:7]
                     )
                     self.maintenance_position_errors.append(float(pos_error))
                     self.maintenance_angle_errors.append(float(ang_error))
@@ -900,22 +922,16 @@ class SatelliteMPCLinearizedSimulation:
                                 target_angle,
                             ) = SatelliteConfig.get_current_waypoint_target()
                             if target_pos is not None:
-                                t_ang = np.degrees(target_angle)
+                                roll_deg, pitch_deg, yaw_deg = np.degrees(target_angle)
                                 logger.info(
                                     f"MOVING TO NEXT TARGET: "
                                     f"({target_pos[0]:.2f}, "
-                                    f"{target_pos[1]:.2f}) m, {t_ang:.1f}°"
+                                    f"{target_pos[1]:.2f}) m, "
+                                    f"roll={roll_deg:.1f}°, pitch={pitch_deg:.1f}°, yaw={yaw_deg:.1f}°"
                                 )
-                                self.target_state = np.array(
-                                    [
-                                        target_pos[0],
-                                        target_pos[1],
-                                        0.0,
-                                        0.0,
-                                        target_angle,
-                                        0.0,
-                                    ]
-                                )
+                                self.target_state = np.zeros(13, dtype=float)
+                                self.target_state[0:3] = target_pos
+                                self.target_state[3:7] = euler_xyz_to_quat_wxyz(target_angle)
                                 self.target_reached_time = None
                                 self.approach_phase_start_time = self.simulation_time
                                 self.target_maintenance_time = 0.0

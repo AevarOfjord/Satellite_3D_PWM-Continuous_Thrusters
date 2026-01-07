@@ -8,11 +8,26 @@ bounds checking, and tolerance verification for satellite simulations.
 import numpy as np
 import pytest
 
+from src.satellite_control.utils.orientation_utils import euler_xyz_to_quat_wxyz
 from src.satellite_control.utils.simulation_state_validator import (
     SimulationStateValidator,
     create_state_validator_from_config,
 )
 from unittest.mock import patch
+
+
+def make_state(
+    pos=(0.0, 0.0, 0.0),
+    euler=(0.0, 0.0, 0.0),
+    vel=(0.0, 0.0, 0.0),
+    omega=(0.0, 0.0, 0.0),
+):
+    state = np.zeros(13)
+    state[0:3] = np.array(pos, dtype=float)
+    state[3:7] = euler_xyz_to_quat_wxyz(euler)
+    state[7:10] = np.array(vel, dtype=float)
+    state[10:13] = np.array(omega, dtype=float)
+    return state
 
 
 class TestStateValidatorInitialization:
@@ -63,7 +78,12 @@ class TestStateFormatValidation:
         """Test validation of valid state."""
         validator = SimulationStateValidator()
 
-        state = np.array([1.0, 2.0, 0.1, 0.2, np.pi / 4, 0.05])
+        state = make_state(
+            pos=(1.0, 2.0, 0.0),
+            euler=(0.0, 0.0, np.pi / 4),
+            vel=(0.1, 0.2, 0.0),
+            omega=(0.0, 0.0, 0.05),
+        )
 
         assert validator.validate_state_format(state)
 
@@ -86,12 +106,24 @@ class TestStateFormatValidation:
         """Test validation rejects non-finite values."""
         validator = SimulationStateValidator()
 
-        state_with_nan = np.array([1.0, 2.0, np.nan, 0.2, 0.5, 0.05])
+        state_with_nan = make_state(
+            pos=(1.0, 2.0, 0.0),
+            euler=(0.0, 0.0, 0.5),
+            vel=(0.1, 0.2, 0.0),
+            omega=(0.0, 0.0, 0.05),
+        )
+        state_with_nan[2] = np.nan
 
         with pytest.raises(ValueError, match="non-finite"):
             validator.validate_state_format(state_with_nan)
 
-        state_with_inf = np.array([1.0, np.inf, 0.1, 0.2, 0.5, 0.05])
+        state_with_inf = make_state(
+            pos=(1.0, 2.0, 0.0),
+            euler=(0.0, 0.0, 0.5),
+            vel=(0.1, 0.2, 0.0),
+            omega=(0.0, 0.0, 0.05),
+        )
+        state_with_inf[1] = np.inf
 
         with pytest.raises(ValueError, match="non-finite"):
             validator.validate_state_format(state_with_inf)
@@ -219,7 +251,12 @@ class TestAllBoundsChecking:
             position_bounds=3.0, max_velocity=0.15, max_angular_velocity=np.pi / 2
         )
 
-        state = np.array([1.0, 2.0, 0.05, 0.05, np.pi / 4, 0.1])
+        state = make_state(
+            pos=(1.0, 2.0, 0.0),
+            euler=(0.0, 0.0, np.pi / 4),
+            vel=(0.05, 0.05, 0.0),
+            omega=(0.0, 0.0, 0.1),
+        )
 
         all_valid, errors = validator.check_all_bounds(state)
 
@@ -233,7 +270,12 @@ class TestAllBoundsChecking:
         )
 
         # Violate position, velocity, and angular velocity
-        state = np.array([4.0, 5.0, 0.3, 0.3, np.pi / 4, 2.0])
+        state = make_state(
+            pos=(4.0, 5.0, 0.0),
+            euler=(0.0, 0.0, np.pi / 4),
+            vel=(0.3, 0.3, 0.0),
+            omega=(0.0, 0.0, 2.0),
+        )
 
         all_valid, errors = validator.check_all_bounds(state)
 
@@ -294,8 +336,13 @@ class TestTargetReachedChecking:
             angular_velocity_tolerance=0.02,
         )
 
-        current_state = np.array([0.05, 0.05, 0.01, 0.01, 0.05, 0.01])
-        target_state = np.array([0.0, 0.0, 0.0, 0.0, 0.0, 0.0])
+        current_state = make_state(
+            pos=(0.05, 0.05, 0.0),
+            euler=(0.0, 0.0, 0.05),
+            vel=(0.01, 0.01, 0.0),
+            omega=(0.0, 0.0, 0.01),
+        )
+        target_state = make_state()
 
         assert validator.check_target_reached(current_state, target_state)
 
@@ -303,8 +350,8 @@ class TestTargetReachedChecking:
         """Test target not reached due to position error."""
         validator = SimulationStateValidator(position_tolerance=0.05)
 
-        current_state = np.array([0.1, 0.1, 0.0, 0.0, 0.0, 0.0])
-        target_state = np.array([0.0, 0.0, 0.0, 0.0, 0.0, 0.0])
+        current_state = make_state(pos=(0.1, 0.1, 0.0))
+        target_state = make_state()
 
         assert not validator.check_target_reached(current_state, target_state)
 
@@ -312,8 +359,8 @@ class TestTargetReachedChecking:
         """Test target not reached due to angle error."""
         validator = SimulationStateValidator(angle_tolerance=0.05)
 
-        current_state = np.array([0.0, 0.0, 0.0, 0.0, 0.2, 0.0])
-        target_state = np.array([0.0, 0.0, 0.0, 0.0, 0.0, 0.0])
+        current_state = make_state(euler=(0.0, 0.0, 0.2))
+        target_state = make_state()
 
         assert not validator.check_target_reached(current_state, target_state)
 
@@ -321,8 +368,8 @@ class TestTargetReachedChecking:
         """Test target not reached due to velocity error."""
         validator = SimulationStateValidator(velocity_tolerance=0.01)
 
-        current_state = np.array([0.0, 0.0, 0.05, 0.05, 0.0, 0.0])
-        target_state = np.array([0.0, 0.0, 0.0, 0.0, 0.0, 0.0])
+        current_state = make_state(vel=(0.05, 0.05, 0.0))
+        target_state = make_state()
 
         assert not validator.check_target_reached(current_state, target_state)
 
@@ -334,8 +381,13 @@ class TestStateErrorComputation:
         """Test computing all state errors."""
         validator = SimulationStateValidator()
 
-        current_state = np.array([1.0, 2.0, 0.1, 0.2, np.pi / 4, 0.05])
-        target_state = np.array([0.0, 0.0, 0.0, 0.0, 0.0, 0.0])
+        current_state = make_state(
+            pos=(1.0, 2.0, 0.0),
+            euler=(0.0, 0.0, np.pi / 4),
+            vel=(0.1, 0.2, 0.0),
+            omega=(0.0, 0.0, 0.05),
+        )
+        target_state = make_state()
 
         errors = validator.compute_state_errors(current_state, target_state)
 
@@ -358,8 +410,13 @@ class TestStateErrorComputation:
         )
 
         # Position and angle within tolerance, velocity and angular velocity not
-        current_state = np.array([0.05, 0.05, 0.1, 0.1, 0.05, 0.05])
-        target_state = np.array([0.0, 0.0, 0.0, 0.0, 0.0, 0.0])
+        current_state = make_state(
+            pos=(0.05, 0.05, 0.0),
+            euler=(0.0, 0.0, 0.05),
+            vel=(0.1, 0.1, 0.0),
+            omega=(0.0, 0.0, 0.05),
+        )
+        target_state = make_state()
 
         tolerances = validator.check_within_tolerances(current_state, target_state)
 
@@ -376,7 +433,12 @@ class TestSensorNoise:
         """Test that no noise is added when disabled."""
         validator = SimulationStateValidator()
 
-        true_state = np.array([1.0, 2.0, 0.1, 0.2, np.pi / 4, 0.05])
+        true_state = make_state(
+            pos=(1.0, 2.0, 0.0),
+            euler=(0.0, 0.0, np.pi / 4),
+            vel=(0.1, 0.2, 0.0),
+            omega=(0.0, 0.0, 0.05),
+        )
 
         # Call function - result intentionally unused for this test
         _ = validator.apply_sensor_noise(true_state, use_realistic_physics=False)
@@ -385,7 +447,12 @@ class TestSensorNoise:
         """Test that noise is added when enabled."""
         validator = SimulationStateValidator()
 
-        true_state = np.array([1.0, 2.0, 0.1, 0.2, np.pi / 4, 0.05])
+        true_state = make_state(
+            pos=(1.0, 2.0, 0.0),
+            euler=(0.0, 0.0, np.pi / 4),
+            vel=(0.1, 0.2, 0.0),
+            omega=(0.0, 0.0, 0.05),
+        )
 
         # Apply noise multiple times with patched config
         patch_path = (
@@ -413,7 +480,12 @@ class TestSensorNoise:
         """Test that noisy state has same format."""
         validator = SimulationStateValidator()
 
-        true_state = np.array([1.0, 2.0, 0.1, 0.2, np.pi / 4, 0.05])
+        true_state = make_state(
+            pos=(1.0, 2.0, 0.0),
+            euler=(0.0, 0.0, np.pi / 4),
+            vel=(0.1, 0.2, 0.0),
+            omega=(0.0, 0.0, 0.05),
+        )
 
         noisy_state = validator.apply_sensor_noise(
             true_state, use_realistic_physics=True
@@ -472,7 +544,12 @@ class TestTrajectoryValidation:
         validator = SimulationStateValidator()
 
         # Use velocities within default max_velocity (0.15 m/s)
-        state = np.array([1.0, 2.0, 0.05, 0.08, np.pi / 4, 0.05])
+        state = make_state(
+            pos=(1.0, 2.0, 0.0),
+            euler=(0.0, 0.0, np.pi / 4),
+            vel=(0.05, 0.08, 0.0),
+            omega=(0.0, 0.0, 0.05),
+        )
         trajectory = [state]
 
         is_valid, errors = validator.validate_state_trajectory(trajectory)
@@ -485,9 +562,19 @@ class TestTrajectoryValidation:
         validator = SimulationStateValidator()
 
         trajectory = [
-            np.array([0.0, 0.0, 0.0, 0.0, 0.0, 0.0]),
-            np.array([0.1, 0.1, 0.05, 0.05, 0.1, 0.02]),
-            np.array([0.2, 0.2, 0.05, 0.05, 0.2, 0.02]),
+            make_state(),
+            make_state(
+                pos=(0.1, 0.1, 0.0),
+                euler=(0.0, 0.0, 0.1),
+                vel=(0.05, 0.05, 0.0),
+                omega=(0.0, 0.0, 0.02),
+            ),
+            make_state(
+                pos=(0.2, 0.2, 0.0),
+                euler=(0.0, 0.0, 0.2),
+                vel=(0.05, 0.05, 0.0),
+                omega=(0.0, 0.0, 0.02),
+            ),
         ]
 
         is_valid, errors = validator.validate_state_trajectory(
@@ -502,8 +589,13 @@ class TestTrajectoryValidation:
         validator = SimulationStateValidator()
 
         trajectory = [
-            np.array([0.0, 0.0, 0.0, 0.0, 0.0, 0.0]),
-            np.array([2.0, 2.0, 0.05, 0.05, 0.1, 0.02]),  # Large jump
+            make_state(),
+            make_state(
+                pos=(2.0, 2.0, 0.0),
+                euler=(0.0, 0.0, 0.1),
+                vel=(0.05, 0.05, 0.0),
+                omega=(0.0, 0.0, 0.02),
+            ),  # Large jump
         ]
 
         is_valid, errors = validator.validate_state_trajectory(
@@ -519,8 +611,8 @@ class TestTrajectoryValidation:
         validator = SimulationStateValidator(position_bounds=3.0)
 
         trajectory = [
-            np.array([0.0, 0.0, 0.0, 0.0, 0.0, 0.0]),
-            np.array([4.0, 4.0, 0.0, 0.0, 0.0, 0.0]),  # Out of bounds
+            make_state(),
+            make_state(pos=(4.0, 4.0, 0.0)),  # Out of bounds
         ]
 
         is_valid, errors = validator.validate_state_trajectory(trajectory)
@@ -536,7 +628,7 @@ class TestEdgeCases:
         """Test with zero state."""
         validator = SimulationStateValidator()
 
-        state = np.array([0.0, 0.0, 0.0, 0.0, 0.0, 0.0])
+        state = make_state()
 
         assert validator.validate_state_format(state)
 
@@ -549,8 +641,8 @@ class TestEdgeCases:
             position_tolerance=1e-6, angle_tolerance=1e-6
         )
 
-        current_state = np.array([1e-7, 1e-7, 0.0, 0.0, 1e-7, 0.0])
-        target_state = np.array([0.0, 0.0, 0.0, 0.0, 0.0, 0.0])
+        current_state = make_state(pos=(1e-7, 1e-7, 0.0), euler=(0.0, 0.0, 1e-7))
+        target_state = make_state()
 
         assert validator.check_target_reached(current_state, target_state)
 
@@ -558,7 +650,12 @@ class TestEdgeCases:
         """Test with large state values."""
         validator = SimulationStateValidator(position_bounds=10.0, max_velocity=1.0)
 
-        state = np.array([9.0, 9.0, 0.5, 0.5, 2 * np.pi, 0.5])
+        state = make_state(
+            pos=(9.0, 9.0, 0.0),
+            euler=(0.0, 0.0, 2 * np.pi),
+            vel=(0.5, 0.5, 0.0),
+            omega=(0.0, 0.0, 0.5),
+        )
 
         is_valid, errors = validator.check_all_bounds(state)
         assert is_valid

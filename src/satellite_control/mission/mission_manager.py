@@ -72,14 +72,15 @@ class MissionManager:
         print("\nSimulation starting configuration:")
         start_pos = self.cli.get_user_position("starting", SatelliteConfig.DEFAULT_START_POS)
         start_angle = self.cli.get_user_orientation("starting", SatelliteConfig.DEFAULT_START_ANGLE)
-        start_vx, start_vy, start_omega = self.cli.get_user_velocities()
+        start_vx, start_vy, start_vz, start_omega = self.cli.get_user_velocities()
 
         # Print summary
-        ang_deg = np.degrees(start_angle)
+        roll_deg, pitch_deg, yaw_deg = np.degrees(start_angle)
         omega_deg = np.degrees(start_omega)
         print(
             f"Starting: ({start_pos[0]:.2f}, {start_pos[1]:.2f}) m, "
-            f"{ang_deg:.1f}°, ({start_vx:.2f}, {start_vy:.2f}) m/s, "
+            f"roll={roll_deg:.1f}°, pitch={pitch_deg:.1f}°, yaw={yaw_deg:.1f}°, "
+            f"({start_vx:.2f}, {start_vy:.2f}, {start_vz:.2f}) m/s, "
             f"{omega_deg:.1f}°/s"
         )
 
@@ -211,8 +212,11 @@ class MissionManager:
             return_angle = self.cli.get_user_orientation("return", start_angle)
             if return_pos is not None and return_angle is not None:
                 rp = return_pos
-                ra_deg = np.degrees(return_angle)
-                print(f"Return position: ({rp[0]:.2f}, {rp[1]:.2f}) m, " f"{ra_deg:.1f}°")
+                ra_roll, ra_pitch, ra_yaw = np.degrees(return_angle)
+                print(
+                    f"Return position: ({rp[0]:.2f}, {rp[1]:.2f}) m, "
+                    f"roll={ra_roll:.1f}°, pitch={ra_pitch:.1f}°, yaw={ra_yaw:.1f}°"
+                )
             has_return = True
         else:
             return_pos = None
@@ -229,8 +233,11 @@ class MissionManager:
         print(f"\n{'=' * 50}")
         print("  SHAPE FOLLOWING MISSION SUMMARY")
         print(f"{'=' * 50}")
-        sa_deg = np.degrees(start_angle)
-        print(f"Starting: ({start_pos[0]:.2f}, {start_pos[1]:.2f}) m, " f"{sa_deg:.1f}°")
+        sa_roll, sa_pitch, sa_yaw = np.degrees(start_angle)
+        print(
+            f"Starting: ({start_pos[0]:.2f}, {start_pos[1]:.2f}) m, "
+            f"roll={sa_roll:.1f}°, pitch={sa_pitch:.1f}°, yaw={sa_yaw:.1f}°"
+        )
         print(f"Shape center: ({shape_center[0]:.2f}, {shape_center[1]:.2f}) m")
         print(f"Shape rotation: {shape_rotation_deg:.1f}°")
         print(f"Offset distance: {offset_distance:.2f} m")
@@ -240,8 +247,11 @@ class MissionManager:
 
         if has_return and return_pos is not None and return_angle is not None:
             rp = return_pos
-            ra_deg = np.degrees(return_angle)
-            print(f"Return position: ({rp[0]:.2f}, {rp[1]:.2f}) m, " f"{ra_deg:.1f}°")
+            ra_roll, ra_pitch, ra_yaw = np.degrees(return_angle)
+            print(
+                f"Return position: ({rp[0]:.2f}, {rp[1]:.2f}) m, "
+                f"roll={ra_roll:.1f}°, pitch={ra_pitch:.1f}°, yaw={ra_yaw:.1f}°"
+            )
 
         print("Mission phases:")
         print("  Phase 1: Position at closest point and stabilize (3s)")
@@ -276,6 +286,7 @@ class MissionManager:
                 "start_angle": start_angle,
                 "start_vx": start_vx,
                 "start_vy": start_vy,
+                "start_vz": start_vz,
                 "start_omega": start_omega,
             }
         )

@@ -40,10 +40,10 @@ def main():
         print("Running in AUTO mode with default parameters...")
 
         # Configure default mission (Point to Point default)
-        SatelliteConfig.DEFAULT_START_POS = (1.0, 1.0)
-        SatelliteConfig.DEFAULT_TARGET_POS = (0.0, 0.0)
-        SatelliteConfig.DEFAULT_START_ANGLE = 0.0
-        SatelliteConfig.DEFAULT_TARGET_ANGLE = 0.0
+        SatelliteConfig.DEFAULT_START_POS = (1.0, 1.0, 0.0)
+        SatelliteConfig.DEFAULT_TARGET_POS = (0.0, 0.0, 0.0)
+        SatelliteConfig.DEFAULT_START_ANGLE = (0.0, 0.0, 0.0)
+        SatelliteConfig.DEFAULT_TARGET_ANGLE = (0.0, 0.0, 0.0)
     else:
         # Interactive Mode
         print("\nSatellite MPC Simulation")

@@ -23,9 +23,9 @@ class SimulationContext:
     dt: float = 0.005  # Physics timestep
     control_dt: float = 0.1  # Control update interval
     step_number: int = 0
-    # State [x, y, vx, vy, theta, omega]
-    current_state: np.ndarray = field(default_factory=lambda: np.zeros(6))
-    target_state: np.ndarray = field(default_factory=lambda: np.zeros(6))
+    # State [x, y, z, qw, qx, qy, qz, vx, vy, vz, wx, wy, wz]
+    current_state: np.ndarray = field(default_factory=lambda: np.zeros(13))
+    target_state: np.ndarray = field(default_factory=lambda: np.zeros(13))
     # Mission
     mission_phase: str = "IDLE"
     waypoint_number: int = 0

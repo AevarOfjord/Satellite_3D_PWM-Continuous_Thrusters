@@ -9,6 +9,22 @@ import time
 import numpy as np
 import pytest
 
+# Helper to build 13-element state vectors.
+def make_state(
+    pos=(0.0, 0.0, 0.0),
+    euler=(0.0, 0.0, 0.0),
+    vel=(0.0, 0.0, 0.0),
+    omega=(0.0, 0.0, 0.0),
+):
+    from src.satellite_control.utils.orientation_utils import euler_xyz_to_quat_wxyz
+
+    state = np.zeros(13)
+    state[0:3] = np.array(pos, dtype=float)
+    state[3:7] = euler_xyz_to_quat_wxyz(euler)
+    state[7:10] = np.array(vel, dtype=float)
+    state[10:13] = np.array(omega, dtype=float)
+    return state
+
 # Check if pytest-benchmark is available
 try:
     import pytest_benchmark  # noqa: F401
@@ -38,13 +54,23 @@ class TestMPCBenchmarks:
     @pytest.fixture
     def sample_state(self):
         """Sample state vector for testing."""
-        # Simulation format: [x, y, vx, vy, theta, omega]
-        return np.array([0.5, 0.3, 0.01, 0.02, 0.1, 0.001])
+        from src.satellite_control.utils.orientation_utils import euler_xyz_to_quat_wxyz
+
+        state = np.zeros(13)
+        state[0:3] = np.array([0.5, 0.3, 0.0])
+        state[3:7] = euler_xyz_to_quat_wxyz((0.0, 0.0, 0.1))
+        state[7:10] = np.array([0.01, 0.02, 0.0])
+        state[10:13] = np.array([0.0, 0.0, 0.001])
+        return state
 
     @pytest.fixture
     def target_state(self):
         """Sample target state for testing."""
-        return np.array([0.0, 0.0, 0.0, 0.0, 0.0, 0.0])
+        from src.satellite_control.utils.orientation_utils import euler_xyz_to_quat_wxyz
+
+        state = np.zeros(13)
+        state[3:7] = euler_xyz_to_quat_wxyz((0.0, 0.0, 0.0))
+        return state
 
     def test_mpc_solve_time(
         self, benchmark, mpc_controller, sample_state, target_state
@@ -61,7 +87,7 @@ class TestMPCBenchmarks:
 
         result = benchmark(solve)
         assert result is not None
-        assert len(result) == 8
+        assert len(result) == 12
 
     def test_linearization_time(self, benchmark, mpc_controller, sample_state):
         """Benchmark dynamics linearization time."""
@@ -168,17 +194,13 @@ class TestMPCRegressionDetection:
         solve_times = []
         for i in range(20):
             # Generate realistic state variations
-            x_current = np.array(
-                [
-                    0.5 * np.random.randn(),  # x
-                    0.5 * np.random.randn(),  # y
-                    0.05 * np.random.randn(),  # vx
-                    0.05 * np.random.randn(),  # vy
-                    np.random.uniform(-np.pi, np.pi),  # theta
-                    0.1 * np.random.randn(),  # omega
-                ]
+            x_current = make_state(
+                pos=(0.5 * np.random.randn(), 0.5 * np.random.randn(), 0.0),
+                euler=(0.0, 0.0, np.random.uniform(-np.pi, np.pi)),
+                vel=(0.05 * np.random.randn(), 0.05 * np.random.randn(), 0.0),
+                omega=(0.0, 0.0, 0.1 * np.random.randn()),
             )
-            x_target = np.array([0.0, 0.0, 0.0, 0.0, 0.0, 0.0])
+            x_target = make_state()
 
             start = time.perf_counter()
             u, info = mpc_controller.get_control_action(x_current, x_target)
@@ -188,7 +210,7 @@ class TestMPCRegressionDetection:
 
             # Verify solution is valid
             assert u is not None
-            assert len(u) == 8
+            assert len(u) == 12
             assert all(0.0 <= v <= 1.0 for v in u)
 
         # Calculate statistics
@@ -232,12 +254,17 @@ class TestMPCRegressionDetection:
 
         Trajectory mode may be slower due to additional computations.
         """
-        x_current = np.array([0.5, 0.3, 0.01, 0.02, 0.5, 0.01])
-        x_target = np.array([0.0, 0.0, 0.0, 0.0, 0.0, 0.0])
+        x_current = make_state(
+            pos=(0.5, 0.3, 0.0),
+            euler=(0.0, 0.0, 0.5),
+            vel=(0.01, 0.02, 0.0),
+            omega=(0.0, 0.0, 0.01),
+        )
+        x_target = make_state()
 
         # Create a simple trajectory
         N = mpc_controller.N
-        trajectory = np.zeros((N + 1, 6))
+        trajectory = np.zeros((N + 1, 13))
         for k in range(N + 1):
             alpha = k / N
             trajectory[k] = (1 - alpha) * x_current + alpha * x_target
@@ -280,8 +307,13 @@ class TestMPCRegressionDetection:
         # import sys  # Unused import removed
         import psutil
 
-        x_current = np.array([0.5, 0.3, 0.01, 0.02, 0.5, 0.01])
-        x_target = np.array([0.0, 0.0, 0.0, 0.0, 0.0, 0.0])
+        x_current = make_state(
+            pos=(0.5, 0.3, 0.0),
+            euler=(0.0, 0.0, 0.5),
+            vel=(0.01, 0.02, 0.0),
+            omega=(0.0, 0.0, 0.01),
+        )
+        x_target = make_state()
 
         def get_process_memory():
             process = psutil.Process(os.getpid())
@@ -295,8 +327,11 @@ class TestMPCRegressionDetection:
         for i in range(100):
             u, info = mpc_controller.get_control_action(x_current, x_target)
 
-            # Vary state slightly each iteration
-            x_current = x_current + 0.001 * np.random.randn(6)
+            # Vary state slightly each iteration (keep quaternion normalized)
+            x_current = x_current.copy()
+            x_current[0:3] += 0.001 * np.random.randn(3)
+            x_current[7:10] += 0.001 * np.random.randn(3)
+            x_current[10:13] += 0.001 * np.random.randn(3)
 
         end_mem = get_process_memory()
 

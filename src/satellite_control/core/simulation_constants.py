@@ -46,7 +46,7 @@ class SimulationConstants:
     DXF_SPEED_TOLERANCE: float = 0.01  # m/s speed matching tolerance
 
     # State validation
-    STATE_VECTOR_LENGTH: int = 6  # [x, y, vx, vy, theta, omega]
+    STATE_VECTOR_LENGTH: int = 13  # [pos(3), quat(4), vel(3), w(3)]
     NUM_THRUSTERS: int = 8
 
     # Numerical stability
