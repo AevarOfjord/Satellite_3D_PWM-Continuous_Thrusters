@@ -250,8 +250,9 @@ class SatelliteMPCLinearizedSimulation:
             self.THRUST_RAMPUP_TIME = 0.0
 
         # Thruster management (valve delays, ramp-up, PWM) - delegated
+        self.num_thrusters = len(SatelliteConfig.THRUSTER_POSITIONS)
         self.thruster_manager = ThrusterManager(
-            num_thrusters=8,
+            num_thrusters=self.num_thrusters,
             valve_delay=self.VALVE_DELAY,
             thrust_rampup_time=self.THRUST_RAMPUP_TIME,
             use_realistic_physics=SatelliteConfig.USE_REALISTIC_PHYSICS,
@@ -284,8 +285,8 @@ class SatelliteMPCLinearizedSimulation:
         self.previous_command: Optional[np.ndarray] = None
 
         # Current control
-        self.current_thrusters = np.zeros(8, dtype=np.float64)
-        self.previous_thrusters = np.zeros(8, dtype=np.float64)
+        self.current_thrusters = np.zeros(self.num_thrusters, dtype=np.float64)
+        self.previous_thrusters = np.zeros(self.num_thrusters, dtype=np.float64)
 
         self.position_tolerance = SatelliteConfig.POSITION_TOLERANCE
         self.angle_tolerance = SatelliteConfig.ANGLE_TOLERANCE

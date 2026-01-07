@@ -117,19 +117,19 @@ class InteractiveMissionCLI:
             ),
             questionary.Separator("─── Quick Start Demos ───"),
             questionary.Choice(
-                title="●  Simple: (1,1) → (0,0)",
+                title="●  Simple: (1,1,1) → (0,0,0)",
                 value="simple",
             ),
             questionary.Choice(
-                title="◆  Obstacle Avoidance: diagonal path",
+                title="◆  Obstacle Avoidance: diagonal 3D path",
                 value="obstacle",
             ),
             questionary.Choice(
-                title="◇  Multi-Waypoint: square pattern",
+                title="◇  Multi-Waypoint: 3D square ramp",
                 value="square",
             ),
             questionary.Choice(
-                title="▫  Corridor: navigate through gap",
+                title="▫  Corridor: navigate through gap + Z",
                 value="corridor",
             ),
         ]
@@ -155,35 +155,35 @@ class InteractiveMissionCLI:
         presets = {
             "simple": {
                 "name": "Simple Navigation",
-                "start_pos": (1.0, 1.0, 0.0),
+                "start_pos": (1.0, 1.0, 1.0),
                 "start_angle": (0.0, 0.0, np.radians(90)),
                 "targets": [((0.0, 0.0, 0.0), (0.0, 0.0, 0.0))],
                 "obstacles": [],
             },
             "obstacle": {
                 "name": "Obstacle Avoidance",
-                "start_pos": (1.0, 1.0, 0.0),
+                "start_pos": (1.0, 1.0, 1.0),
                 "start_angle": (0.0, 0.0, np.radians(45)),
                 "targets": [((-1.0, -1.0, 0.0), (0.0, 0.0, np.radians(-135)))],
                 "obstacles": [(0.0, 0.0, 0.3)],
             },
             "square": {
                 "name": "Square Pattern",
-                "start_pos": (0.0, 0.0, 0.0),
+                "start_pos": (0.0, 0.0, 0.5),
                 "start_angle": (0.0, 0.0, 0.0),
                 "targets": [
-                    ((1.0, 0.0, 0.0), (0.0, 0.0, 0.0)),
-                    ((1.0, 1.0, 0.0), (0.0, 0.0, np.radians(90))),
+                    ((1.0, 0.0, 1.0), (0.0, 0.0, 0.0)),
+                    ((1.0, 1.0, 0.5), (0.0, 0.0, np.radians(90))),
                     ((0.0, 1.0, 0.0), (0.0, 0.0, np.radians(180))),
-                    ((0.0, 0.0, 0.0), (0.0, 0.0, np.radians(270))),
+                    ((0.0, 0.0, 0.5), (0.0, 0.0, np.radians(270))),
                 ],
                 "obstacles": [],
             },
             "corridor": {
                 "name": "Corridor Navigation",
-                "start_pos": (1.0, 0.0, 0.0),
+                "start_pos": (1.0, 0.0, 1.0),
                 "start_angle": (0.0, 0.0, np.radians(180)),
-                "targets": [((-1.0, 0.0, 0.0), (0.0, 0.0, np.radians(180)))],
+                "targets": [((-1.0, 0.0, 0.5), (0.0, 0.0, np.radians(180)))],
                 "obstacles": [(0.0, 0.5, 0.3), (0.0, -0.5, 0.3)],
             },
         }

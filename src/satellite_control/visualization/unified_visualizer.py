@@ -1425,6 +1425,7 @@ class UnifiedVisualizationGenerator:
         self._generate_thruster_valve_activity_plot(plots_dir)
         self._generate_pwm_quantization_plot(plots_dir)
         self._generate_control_effort_plot(plots_dir)
+        self._generate_velocity_tracking_plot(plots_dir)
         self._generate_velocity_magnitude_plot(plots_dir)
         self._generate_mpc_performance_plot(plots_dir)
         self._generate_timing_intervals_plot(plots_dir)
@@ -1435,7 +1436,7 @@ class UnifiedVisualizationGenerator:
         """Generate position tracking over time plot."""
         assert self.dt is not None, "dt must be set"
 
-        fig, axes = plt.subplots(2, 1, figsize=PlotStyle.FIGSIZE_SUBPLOTS)
+        fig, axes = plt.subplots(3, 1, figsize=PlotStyle.FIGSIZE_SUBPLOTS)
         fig.suptitle(f"Position Tracking - {self.system_title}")
 
         time = np.arange(self._get_len()) * float(self.dt)
@@ -1482,6 +1483,28 @@ class UnifiedVisualizationGenerator:
         axes[1].grid(True, alpha=PlotStyle.GRID_ALPHA)
         axes[1].legend(fontsize=PlotStyle.LEGEND_SIZE)
         axes[1].set_title("Y Position Tracking")
+
+        # Z position tracking
+        axes[2].plot(
+            time,
+            self._col("Current_Z"),
+            color=PlotStyle.COLOR_SIGNAL_POS,
+            linewidth=PlotStyle.LINEWIDTH,
+            label="Current Z",
+        )
+        axes[2].plot(
+            time,
+            self._col("Target_Z"),
+            color=PlotStyle.COLOR_TARGET,
+            linestyle="--",
+            linewidth=PlotStyle.LINEWIDTH,
+            label="Target Z",
+        )
+        axes[2].set_xlabel("Time (s)", fontsize=PlotStyle.AXIS_LABEL_SIZE)
+        axes[2].set_ylabel("Z Position (m)", fontsize=PlotStyle.AXIS_LABEL_SIZE)
+        axes[2].grid(True, alpha=PlotStyle.GRID_ALPHA)
+        axes[2].legend(fontsize=PlotStyle.LEGEND_SIZE)
+        axes[2].set_title("Z Position Tracking")
 
         PlotStyle.save_figure(fig, plot_dir / "position_tracking.png")
 
@@ -1554,51 +1577,59 @@ class UnifiedVisualizationGenerator:
         return times_clean, values_clean
 
     def _generate_angular_tracking_plot(self, plot_dir: Path) -> None:
-        """Generate angular tracking plot (0-360° visualization with wrap handling)."""
+        """Generate angular tracking plots for roll, pitch, and yaw."""
         assert self.dt is not None, "dt must be set"
 
-        fig, ax = plt.subplots(1, 1, figsize=PlotStyle.FIGSIZE_SINGLE)
+        fig, axes = plt.subplots(3, 1, figsize=PlotStyle.FIGSIZE_SUBPLOTS)
 
         time = np.arange(self._get_len()) * float(self.dt)
 
-        def to_0_360(rad_series):
-            deg = np.degrees(np.array(rad_series))
-            return np.mod(deg, 360.0)
+        def plot_angle(ax, title, current_col, target_col, ylabel):
+            cur_deg = np.degrees(np.array(self._col(current_col)))
+            tgt_deg = np.degrees(np.array(self._col(target_col)))
 
-        # Map to 0-360 range
-        cur_deg = to_0_360(self._col("Current_Yaw"))
-        tgt_deg = to_0_360(self._col("Target_Yaw"))
+            min_len = min(len(time), len(cur_deg))
+            if min_len == 0:
+                return
 
-        # Clean wrap-around artifacts so 359->1 doesn't draw a vertical line
-        t_cur, y_cur = self._break_wrap_around(time, cur_deg)
-        t_tgt, y_tgt = self._break_wrap_around(time, tgt_deg)
+            t_base = time[:min_len]
+            cur_deg = cur_deg[:min_len]
+            t_cur, y_cur = self._break_wrap_around(t_base, cur_deg)
 
-        ax.plot(
-            t_cur,
-            y_cur,
-            color=PlotStyle.COLOR_SIGNAL_ANG,
-            linewidth=PlotStyle.LINEWIDTH,
-            label="Current Yaw",
-        )
-        ax.plot(
-            t_tgt,
-            y_tgt,
-            color=PlotStyle.COLOR_TARGET,
-            linestyle="--",
-            linewidth=PlotStyle.LINEWIDTH,
-            label="Target Yaw",
-        )
+            tgt_vals = None
+            if len(tgt_deg) > 0:
+                tgt_min = min(len(time), len(tgt_deg))
+                t_tgt = time[:tgt_min]
+                tgt_deg = tgt_deg[:tgt_min]
+                t_tgt, y_tgt = self._break_wrap_around(t_tgt, tgt_deg)
+                tgt_vals = (t_tgt, y_tgt)
 
-        ax.set_xlabel("Time (seconds)", fontsize=PlotStyle.AXIS_LABEL_SIZE)
-        ax.set_ylabel("Yaw Angle (degrees, 0–360°)", fontsize=PlotStyle.AXIS_LABEL_SIZE)
-        ax.set_title(f"Angular Tracking - {self.system_title}")
+            ax.plot(
+                t_cur,
+                y_cur,
+                color=PlotStyle.COLOR_SIGNAL_ANG,
+                linewidth=PlotStyle.LINEWIDTH,
+                label=f"Current {title}",
+            )
+            if tgt_vals is not None:
+                ax.plot(
+                    tgt_vals[0],
+                    tgt_vals[1],
+                    color=PlotStyle.COLOR_TARGET,
+                    linestyle="--",
+                    linewidth=PlotStyle.LINEWIDTH,
+                    label=f"Target {title}",
+                )
 
-        # Set Y-axis to 0-360
-        ax.set_ylim(0, 360)
-        ax.set_yticks(np.arange(0, 361, 45))
+            ax.set_ylabel(ylabel, fontsize=PlotStyle.AXIS_LABEL_SIZE)
+            ax.set_title(f"{title} Tracking")
+            ax.grid(True, alpha=PlotStyle.GRID_ALPHA)
+            ax.legend(fontsize=PlotStyle.LEGEND_SIZE)
 
-        ax.grid(True, alpha=PlotStyle.GRID_ALPHA)
-        ax.legend(fontsize=PlotStyle.LEGEND_SIZE)
+        plot_angle(axes[0], "Roll", "Current_Roll", "Target_Roll", "Roll (deg)")
+        plot_angle(axes[1], "Pitch", "Current_Pitch", "Target_Pitch", "Pitch (deg)")
+        plot_angle(axes[2], "Yaw", "Current_Yaw", "Target_Yaw", "Yaw (deg)")
+        axes[2].set_xlabel("Time (seconds)", fontsize=PlotStyle.AXIS_LABEL_SIZE)
 
         PlotStyle.save_figure(fig, plot_dir / "angular_tracking.png")
 
@@ -1653,17 +1684,21 @@ class UnifiedVisualizationGenerator:
 
     def _generate_trajectory_plot(self, plot_dir: Path) -> None:
         """Generate trajectory plot."""
-        fig, ax = plt.subplots(1, 1, figsize=PlotStyle.FIGSIZE_SUBPLOTS)
+        fig, axes = plt.subplots(1, 2, figsize=(12, 6))
 
         x_pos = self._col("Current_X")
         y_pos = self._col("Current_Y")
+        z_pos = self._col("Current_Z")
         target_x_col = self._col("Target_X")
         target_y_col = self._col("Target_Y")
+        target_z_col = self._col("Target_Z")
         target_x = target_x_col[0] if len(target_x_col) > 0 else 0.0
         target_y = target_y_col[0] if len(target_y_col) > 0 else 0.0
+        target_z = target_z_col[0] if len(target_z_col) > 0 else 0.0
 
         # Plot trajectory
-        ax.plot(
+        ax_xy = axes[0]
+        ax_xy.plot(
             x_pos,
             y_pos,
             color=PlotStyle.COLOR_SIGNAL_POS,
@@ -1672,7 +1707,7 @@ class UnifiedVisualizationGenerator:
             label="Satellite Path",
         )
         if len(x_pos) > 0:
-            ax.plot(
+            ax_xy.plot(
                 x_pos[0],
                 y_pos[0],
                 "o",
@@ -1680,7 +1715,7 @@ class UnifiedVisualizationGenerator:
                 markersize=PlotStyle.MARKER_SIZE,
                 label="Start Position",
             )
-            ax.plot(
+            ax_xy.plot(
                 x_pos[-1],
                 y_pos[-1],
                 "o",
@@ -1688,13 +1723,13 @@ class UnifiedVisualizationGenerator:
                 markersize=PlotStyle.MARKER_SIZE,
                 label="Final Position",
             )
-        ax.plot(target_x, target_y, "r*", markersize=20, label="Target")
+        ax_xy.plot(target_x, target_y, "r*", markersize=20, label="Target")
 
         try:
             if isinstance(self.dxf_base_shape, (list, tuple)) and len(self.dxf_base_shape) >= 3:
                 bx = [p[0] for p in self.dxf_base_shape] + [self.dxf_base_shape[0][0]]
                 by = [p[1] for p in self.dxf_base_shape] + [self.dxf_base_shape[0][1]]
-                ax.plot(
+                ax_xy.plot(
                     bx,
                     by,
                     color="#9b59b6",
@@ -1705,7 +1740,7 @@ class UnifiedVisualizationGenerator:
             if isinstance(self.dxf_offset_path, (list, tuple)) and len(self.dxf_offset_path) >= 2:
                 px = [p[0] for p in self.dxf_offset_path]
                 py = [p[1] for p in self.dxf_offset_path]
-                ax.plot(
+                ax_xy.plot(
                     px,
                     py,
                     color="#e67e22",
@@ -1715,7 +1750,7 @@ class UnifiedVisualizationGenerator:
                     label="Shape Path",
                 )
             if isinstance(self.dxf_center, (list, tuple)) and len(self.dxf_center) == 2:
-                ax.scatter(
+                ax_xy.scatter(
                     self.dxf_center[0],
                     self.dxf_center[1],
                     c="#2ecc71",
@@ -1738,33 +1773,114 @@ class UnifiedVisualizationGenerator:
             alpha=0.7,
             label="Target Zone (±0.1m)",
         )
-        ax.add_patch(circle)
+        ax_xy.add_patch(circle)
 
-        ax.set_xlim(-3, 3)
-        ax.set_ylim(-3, 3)
-        ax.set_xlabel("X Position (meters)", fontsize=PlotStyle.AXIS_LABEL_SIZE)
-        ax.set_ylabel("Y Position (meters)", fontsize=PlotStyle.AXIS_LABEL_SIZE)
-        ax.set_title(f"Satellite Trajectory - {self.system_title}")
-        ax.grid(True, alpha=PlotStyle.GRID_ALPHA)
-        ax.legend(fontsize=PlotStyle.LEGEND_SIZE)
-        ax.set_aspect("equal")
+        ax_xy.set_xlim(-3, 3)
+        ax_xy.set_ylim(-3, 3)
+        ax_xy.set_xlabel("X Position (meters)", fontsize=PlotStyle.AXIS_LABEL_SIZE)
+        ax_xy.set_ylabel("Y Position (meters)", fontsize=PlotStyle.AXIS_LABEL_SIZE)
+        ax_xy.set_title("Trajectory (X-Y)")
+        ax_xy.grid(True, alpha=PlotStyle.GRID_ALPHA)
+        ax_xy.legend(fontsize=PlotStyle.LEGEND_SIZE)
+        ax_xy.set_aspect("equal")
+
+        ax_xz = axes[1]
+        ax_xz.plot(
+            x_pos,
+            z_pos,
+            color=PlotStyle.COLOR_SIGNAL_POS,
+            linewidth=PlotStyle.LINEWIDTH_THICK,
+            alpha=0.8,
+            label="Satellite Path",
+        )
+        if len(x_pos) > 0 and len(z_pos) > 0:
+            ax_xz.plot(
+                x_pos[0],
+                z_pos[0],
+                "o",
+                color=PlotStyle.COLOR_SUCCESS,
+                markersize=PlotStyle.MARKER_SIZE,
+                label="Start Position",
+            )
+            ax_xz.plot(
+                x_pos[-1],
+                z_pos[-1],
+                "o",
+                color=PlotStyle.COLOR_ERROR,
+                markersize=PlotStyle.MARKER_SIZE,
+                label="Final Position",
+            )
+        ax_xz.plot(target_x, target_z, "r*", markersize=20, label="Target")
+
+        circle_xz = Circle(
+            (target_x, target_z),
+            0.1,
+            color=PlotStyle.COLOR_TARGET,
+            fill=False,
+            linewidth=PlotStyle.LINEWIDTH,
+            linestyle="--",
+            alpha=0.7,
+            label="Target Zone (±0.1m)",
+        )
+        ax_xz.add_patch(circle_xz)
+
+        ax_xz.set_xlim(-3, 3)
+        ax_xz.set_ylim(-3, 3)
+        ax_xz.set_xlabel("X Position (meters)", fontsize=PlotStyle.AXIS_LABEL_SIZE)
+        ax_xz.set_ylabel("Z Position (meters)", fontsize=PlotStyle.AXIS_LABEL_SIZE)
+        ax_xz.set_title("Trajectory (X-Z)")
+        ax_xz.grid(True, alpha=PlotStyle.GRID_ALPHA)
+        ax_xz.legend(fontsize=PlotStyle.LEGEND_SIZE)
+        ax_xz.set_aspect("equal")
 
         # Add distance info
-        if len(x_pos) > 0:
-            final_distance = np.sqrt((x_pos[-1] - target_x) ** 2 + (y_pos[-1] - target_y) ** 2)
+        if len(x_pos) > 0 and len(y_pos) > 0 and len(z_pos) > 0:
+            final_distance = np.sqrt(
+                (x_pos[-1] - target_x) ** 2
+                + (y_pos[-1] - target_y) ** 2
+                + (z_pos[-1] - target_z) ** 2
+            )
         else:
             final_distance = 0.0
-        ax.text(
+        ax_xy.text(
             0.02,
             0.98,
             f"Final Distance to Target: {final_distance:.3f}m",
-            transform=ax.transAxes,
+            transform=ax_xy.transAxes,
             fontsize=PlotStyle.ANNOTATION_SIZE,
             verticalalignment="top",
             bbox=PlotStyle.TEXTBOX_STYLE,
         )
 
         PlotStyle.save_figure(fig, plot_dir / "trajectory.png")
+
+    def _get_thruster_count(self) -> int:
+        """Determine thruster count based on available data or config."""
+        cols: List[str] = []
+        if self._data_backend == "pandas" and self.data is not None:
+            cols = list(self.data.columns)
+        elif self._col_data is not None:
+            cols = list(self._col_data.keys())
+
+        max_id = 0
+        if cols:
+            for i in range(1, 33):
+                if f"Thruster_{i}_Val" in cols or f"Thruster_{i}_Cmd" in cols:
+                    max_id = i
+
+        if max_id > 0:
+            return max_id
+
+        if hasattr(self, "control_data") and self.control_data is not None:
+            if "Command_Vector" in self.control_data.columns and len(self.control_data) > 0:
+                sample_vec = self.parse_command_vector(self.control_data["Command_Vector"].iloc[0])
+                if sample_vec.size > 0:
+                    return int(sample_vec.size)
+
+        try:
+            return len(SatelliteConfig.THRUSTER_POSITIONS)
+        except Exception:
+            return 12
 
     def _generate_thruster_usage_plot(self, plot_dir: Path) -> None:
         """Generate thruster usage plot using actual valve states.
@@ -1778,8 +1894,9 @@ class UnifiedVisualizationGenerator:
 
         fig, ax = plt.subplots(1, 1, figsize=PlotStyle.FIGSIZE_SUBPLOTS)
 
-        thruster_ids = np.arange(1, 9)  # Thrusters 1-8
-        total_activation_time = np.zeros(8)
+        thruster_count = self._get_thruster_count()
+        thruster_ids = np.arange(1, thruster_count + 1)
+        total_activation_time = np.zeros(thruster_count)
         data_source = "commanded"
 
         # Try to use actual valve states (Thruster_X_Val) for accurate PWM tracking
@@ -1794,7 +1911,7 @@ class UnifiedVisualizationGenerator:
         if has_valve_data:
             # Use actual valve states - most accurate for PWM
             data_source = "actual valve"
-            for i in range(8):
+            for i in range(thruster_count):
                 col_name = f"Thruster_{i+1}_Val"
                 vals = self._col(col_name)
                 try:
@@ -1811,6 +1928,13 @@ class UnifiedVisualizationGenerator:
                 cmd_vec = self.parse_command_vector(row["Command_Vector"])
                 command_data.append(cmd_vec)
             command_matrix = np.array(command_data)
+            if command_matrix.ndim == 2:
+                if command_matrix.shape[1] >= thruster_count:
+                    command_matrix = command_matrix[:, :thruster_count]
+                else:
+                    pad = np.zeros((command_matrix.shape[0], thruster_count))
+                    pad[:, : command_matrix.shape[1]] = command_matrix
+                    command_matrix = pad
             total_activation_time = np.sum(command_matrix, axis=0) * float(self.dt)
 
         # Create bar plot
@@ -1878,12 +2002,15 @@ class UnifiedVisualizationGenerator:
         if not has_valve_data:
             return
 
-        fig, axes = plt.subplots(4, 2, figsize=(15, 12), sharex=True)
+        thruster_count = self._get_thruster_count()
+        cols = 3 if thruster_count > 8 else 2
+        rows = int(np.ceil(thruster_count / cols))
+        fig, axes = plt.subplots(rows, cols, figsize=(15, 4 * rows), sharex=True)
         axes = axes.flatten()
 
         time = np.arange(self._get_len()) * float(self.dt)
 
-        for i in range(8):
+        for i in range(thruster_count):
             thruster_id = i + 1
             col_name_val = f"Thruster_{thruster_id}_Val"
             col_name_cmd = f"Thruster_{thruster_id}_Cmd"
@@ -1924,7 +2051,7 @@ class UnifiedVisualizationGenerator:
             ax.set_ylabel(f"T{thruster_id}")
             ax.set_title(f"Thruster {thruster_id}", fontsize=10, pad=2)
 
-            if i >= 6:
+            if i // cols == rows - 1:
                 ax.set_xlabel("Time (s)")
 
             if i == 0:
@@ -1975,6 +2102,8 @@ class UnifiedVisualizationGenerator:
             f"Thruster Valve Activity (0.0 - 1.0) - {self.system_title}",
             fontsize=16,
         )
+        for idx in range(thruster_count, len(axes)):
+            axes[idx].axis("off")
         plt.tight_layout()
         plt.subplots_adjust(top=0.92)
         plt.savefig(
@@ -2006,20 +2135,27 @@ class UnifiedVisualizationGenerator:
         time = control_df["Control_Time"].values
 
         # Parse the command vectors
-        duty_cycles_per_thruster: Dict[int, List[float]] = {i: [] for i in range(8)}
+        thruster_count = self._get_thruster_count()
+        duty_cycles_per_thruster: Dict[int, List[float]] = {
+            i: [] for i in range(thruster_count)
+        }
 
         for cmd_str in control_df["Command_Vector"]:
             try:
                 # Parse "[0.000, 1.000, ...]" format
                 values = cmd_str.strip('[]"').split(",")
-                for i, v in enumerate(values[:8]):
-                    duty_cycles_per_thruster[i].append(float(v.strip()))
+                for i in range(thruster_count):
+                    if i < len(values):
+                        duty_cycles_per_thruster[i].append(float(values[i].strip()))
+                    else:
+                        duty_cycles_per_thruster[i].append(0.0)
             except BaseException:
-                for i in range(8):
+                for i in range(thruster_count):
                     duty_cycles_per_thruster[i].append(0.0)
 
-        # Create figure with 8 subplots (one per thruster)
-        fig, axes = plt.subplots(4, 2, figsize=(14, 12), sharex=True, sharey=True)
+        cols = 3 if thruster_count > 8 else 2
+        rows = int(np.ceil(thruster_count / cols))
+        fig, axes = plt.subplots(rows, cols, figsize=(14, 3.5 * rows), sharex=True, sharey=True)
         axes = axes.flatten()
         fig.suptitle(
             f"PWM MPC Duty Cycle Output (u) vs Time - {self.system_title}",
@@ -2027,12 +2163,15 @@ class UnifiedVisualizationGenerator:
             fontweight="bold",
         )
 
-        colors = plt.cm.tab10(np.linspace(0, 1, 8))  # type: ignore[attr-defined]
+        colors = plt.cm.tab20(np.linspace(0, 1, thruster_count))  # type: ignore[attr-defined]
 
         # Track if we find any intermediate values
         all_intermediate_values = []
 
         for i, ax in enumerate(axes):
+            if i >= thruster_count:
+                ax.axis("off")
+                continue
             thruster_id = i + 1
             duty_cycles = np.array(duty_cycles_per_thruster[i])
 
@@ -2085,8 +2224,9 @@ class UnifiedVisualizationGenerator:
                 )
 
         # X-axis label on bottom row
-        axes[6].set_xlabel("Time (s)", fontsize=12)
-        axes[7].set_xlabel("Time (s)", fontsize=12)
+        for i in range(thruster_count):
+            if i // cols == rows - 1:
+                axes[i].set_xlabel("Time (s)", fontsize=12)
 
         # Add summary annotation
         if all_intermediate_values:
@@ -2128,6 +2268,49 @@ class UnifiedVisualizationGenerator:
         """Fallback: Generate PWM plot from physics_data Thruster_X_Cmd columns."""
         # This shows binary valve states, not continuous duty cycles
         pass
+
+    def _generate_velocity_tracking_plot(self, plot_dir: Path) -> None:
+        """Generate velocity tracking over time plot."""
+        assert self.dt is not None, "dt must be set"
+
+        fig, axes = plt.subplots(3, 1, figsize=PlotStyle.FIGSIZE_SUBPLOTS)
+        fig.suptitle(f"Velocity Tracking - {self.system_title}")
+
+        time = np.arange(self._get_len()) * float(self.dt)
+
+        def plot_velocity(ax, axis_label, current_col, target_col):
+            current_vals = self._col(current_col)
+            min_len = min(len(time), len(current_vals))
+            if min_len == 0:
+                return
+            ax.plot(
+                time[:min_len],
+                current_vals[:min_len],
+                color=PlotStyle.COLOR_SIGNAL_POS,
+                linewidth=PlotStyle.LINEWIDTH,
+                label=f"Current {axis_label}",
+            )
+            target_vals = self._col(target_col)
+            if len(target_vals) > 0:
+                tgt_len = min(len(time), len(target_vals))
+                ax.plot(
+                    time[:tgt_len],
+                    target_vals[:tgt_len],
+                    color=PlotStyle.COLOR_TARGET,
+                    linestyle="--",
+                    linewidth=PlotStyle.LINEWIDTH,
+                    label=f"Target {axis_label}",
+                )
+            ax.set_ylabel(f"{axis_label} Velocity (m/s)", fontsize=PlotStyle.AXIS_LABEL_SIZE)
+            ax.grid(True, alpha=PlotStyle.GRID_ALPHA)
+            ax.legend(fontsize=PlotStyle.LEGEND_SIZE)
+
+        plot_velocity(axes[0], "X", "Current_VX", "Target_VX")
+        plot_velocity(axes[1], "Y", "Current_VY", "Target_VY")
+        plot_velocity(axes[2], "Z", "Current_VZ", "Target_VZ")
+        axes[2].set_xlabel("Time (s)", fontsize=PlotStyle.AXIS_LABEL_SIZE)
+
+        PlotStyle.save_figure(fig, plot_dir / "velocity_tracking.png")
 
     def _generate_control_effort_plot(self, plot_dir: Path) -> None:
         """Generate control effort plot."""

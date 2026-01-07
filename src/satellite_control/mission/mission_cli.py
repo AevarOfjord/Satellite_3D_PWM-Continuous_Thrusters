@@ -341,7 +341,7 @@ class MissionCLI:
         """
         print("\n=== Mission Setup ===")
         print("1. Custom mission (manual entry)")
-        print("2. Demo: Simple (1,1) → (0,0)")
+        print("2. Demo: Simple (1,1,1) → (0,0,0)")
         print("3. Demo: Diagonal with obstacle")
         print("4. Demo: Multi-waypoint square")
         print("5. Demo: Corridor navigation")
@@ -350,7 +350,7 @@ class MissionCLI:
 
         if choice == "2":
             # Simple demo: corner to origin
-            print("\n  Preset: Simple navigation (1,1) → (0,0)")
+            print("\n  Preset: Simple navigation (1,1,1) → (0,0,0)")
             SatelliteConfig.clear_obstacles()
             SatelliteConfig.OBSTACLES_ENABLED = False
 
@@ -359,7 +359,7 @@ class MissionCLI:
 
             # Configure waypoints
             self._configure_preset_waypoints(
-                start_pos=(1.0, 1.0, 0.0),
+                start_pos=(1.0, 1.0, 1.0),
                 start_angle=(0.0, 0.0, np.radians(90)),
                 targets=[((0.0, 0.0, 0.0), (0.0, 0.0, 0.0))],
             )
@@ -367,7 +367,7 @@ class MissionCLI:
             return {
                 "mission_type": "waypoint_navigation",
                 "mode": "multi_point",
-                "start_pos": (1.0, 1.0, 0.0),
+                "start_pos": (1.0, 1.0, 1.0),
                 "start_angle": (0.0, 0.0, np.radians(90)),
                 "start_vx": 0.0,
                 "start_vy": 0.0,
@@ -378,7 +378,7 @@ class MissionCLI:
         elif choice == "3":
             # Diagonal with central obstacle
             print("\n  Preset: Diagonal with central obstacle")
-            print("    (1,1) → (-1,-1) avoiding obstacle at (0,0)")
+            print("    (1,1,1) → (-1,-1,0) avoiding obstacle at (0,0)")
             SatelliteConfig.clear_obstacles()
             SatelliteConfig.add_obstacle(0.0, 0.0, 0.3)
             SatelliteConfig.OBSTACLES_ENABLED = True
@@ -388,7 +388,7 @@ class MissionCLI:
 
             # Configure waypoints
             self._configure_preset_waypoints(
-                start_pos=(1.0, 1.0, 0.0),
+                start_pos=(1.0, 1.0, 1.0),
                 start_angle=(0.0, 0.0, np.radians(45)),
                 targets=[((-1.0, -1.0, 0.0), (0.0, 0.0, np.radians(-135)))],
             )
@@ -396,7 +396,7 @@ class MissionCLI:
             return {
                 "mission_type": "waypoint_navigation",
                 "mode": "multi_point",
-                "start_pos": (1.0, 1.0, 0.0),
+                "start_pos": (1.0, 1.0, 1.0),
                 "start_angle": (0.0, 0.0, np.radians(45)),
                 "start_vx": 0.0,
                 "start_vy": 0.0,
@@ -407,7 +407,7 @@ class MissionCLI:
         elif choice == "4":
             # Multi-waypoint square pattern
             print("\n  Preset: Multi-waypoint square pattern")
-            print("    (0,0) → (1,0) → (1,1) → (0,1) → (0,0)")
+            print("    (0,0,0.5) → (1,0,1.0) → (1,1,0.5) → (0,1,0.0) → (0,0,0.5)")
             SatelliteConfig.clear_obstacles()
             SatelliteConfig.OBSTACLES_ENABLED = False
 
@@ -415,13 +415,13 @@ class MissionCLI:
                 return {}
 
             targets = [
-                ((1.0, 0.0, 0.0), (0.0, 0.0, 0.0)),
-                ((1.0, 1.0, 0.0), (0.0, 0.0, np.radians(90))),
+                ((1.0, 0.0, 1.0), (0.0, 0.0, 0.0)),
+                ((1.0, 1.0, 0.5), (0.0, 0.0, np.radians(90))),
                 ((0.0, 1.0, 0.0), (0.0, 0.0, np.radians(180))),
-                ((0.0, 0.0, 0.0), (0.0, 0.0, np.radians(270))),
+                ((0.0, 0.0, 0.5), (0.0, 0.0, np.radians(270))),
             ]
             self._configure_preset_waypoints(
-                start_pos=(0.0, 0.0, 0.0),
+                start_pos=(0.0, 0.0, 0.5),
                 start_angle=(0.0, 0.0, 0.0),
                 targets=targets,
             )
@@ -429,7 +429,7 @@ class MissionCLI:
             return {
                 "mission_type": "waypoint_navigation",
                 "mode": "multi_point",
-                "start_pos": (0.0, 0.0, 0.0),
+                "start_pos": (0.0, 0.0, 0.5),
                 "start_angle": (0.0, 0.0, 0.0),
                 "start_vx": 0.0,
                 "start_vy": 0.0,
@@ -440,7 +440,7 @@ class MissionCLI:
         elif choice == "5":
             # Corridor navigation
             print("\n  Preset: Corridor navigation")
-            print("    (1,0) → (-1,0) through gap between obstacles")
+            print("    (1,0,1.0) → (-1,0,0.5) through gap between obstacles")
             SatelliteConfig.clear_obstacles()
             SatelliteConfig.add_obstacle(0.0, 0.5, 0.3)
             SatelliteConfig.add_obstacle(0.0, -0.5, 0.3)
@@ -450,15 +450,15 @@ class MissionCLI:
                 return {}
 
             self._configure_preset_waypoints(
-                start_pos=(1.0, 0.0, 0.0),
+                start_pos=(1.0, 0.0, 1.0),
                 start_angle=(0.0, 0.0, np.radians(180)),
-                targets=[((-1.0, 0.0, 0.0), (0.0, 0.0, np.radians(180)))],
+                targets=[((-1.0, 0.0, 0.5), (0.0, 0.0, np.radians(180)))],
             )
 
             return {
                 "mission_type": "waypoint_navigation",
                 "mode": "multi_point",
-                "start_pos": (1.0, 0.0, 0.0),
+                "start_pos": (1.0, 0.0, 1.0),
                 "start_angle": (0.0, 0.0, np.radians(180)),
                 "start_vx": 0.0,
                 "start_vy": 0.0,

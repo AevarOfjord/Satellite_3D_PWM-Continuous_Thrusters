@@ -32,7 +32,7 @@ class ThrusterManager:
 
     def __init__(
         self,
-        num_thrusters: int = 8,
+        num_thrusters: int = 12,
         valve_delay: float = 0.0,
         thrust_rampup_time: float = 0.0,
         use_realistic_physics: bool = False,
@@ -42,7 +42,7 @@ class ThrusterManager:
         Initialize thruster manager.
 
         Args:
-            num_thrusters: Number of thrusters (default 8)
+            num_thrusters: Number of thrusters (default 12)
             valve_delay: Time from command to valve action [s]
             thrust_rampup_time: Time for thrust to reach full value [s]
             use_realistic_physics: Enable valve delays and ramp-up
@@ -90,8 +90,17 @@ class ThrusterManager:
             thruster_pattern: Array [0,1] for thruster commands (duty cycle)
             simulation_time: Current simulation time
         """
+        thruster_pattern = np.asarray(thruster_pattern, dtype=np.float64)
         if thruster_pattern.ndim == 2:
             thruster_pattern = thruster_pattern[:, 0]
+        thruster_pattern = thruster_pattern.ravel()
+
+        if thruster_pattern.size < self.num_thrusters:
+            padded = np.zeros(self.num_thrusters, dtype=np.float64)
+            padded[: thruster_pattern.size] = thruster_pattern
+            thruster_pattern = padded
+        elif thruster_pattern.size > self.num_thrusters:
+            thruster_pattern = thruster_pattern[: self.num_thrusters]
 
         self.current_thrusters = thruster_pattern.copy()
 

@@ -47,7 +47,7 @@ class SimulationConstants:
 
     # State validation
     STATE_VECTOR_LENGTH: int = 13  # [pos(3), quat(4), vel(3), w(3)]
-    NUM_THRUSTERS: int = 8
+    NUM_THRUSTERS: int = 12
 
     # Numerical stability
     EPSILON: float = 1e-10  # Small value to avoid division by zero

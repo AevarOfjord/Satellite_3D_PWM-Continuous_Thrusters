@@ -316,9 +316,14 @@ class MuJoCoSatelliteSimulator:
 
     @position.setter
     def position(self, value: np.ndarray):
-        """Set position [x, y]."""
+        """Set position [x, y, z]."""
+        if len(value) < 3:
+            pos = np.zeros(3)
+            pos[: len(value)] = value
+            value = pos
         self.data.qpos[0] = value[0]
         self.data.qpos[1] = value[1]
+        self.data.qpos[2] = value[2]
         mujoco.mj_forward(self.model, self.data)
 
     @property
@@ -335,9 +340,14 @@ class MuJoCoSatelliteSimulator:
 
     @velocity.setter
     def velocity(self, value: np.ndarray):
-        """Set velocity [vx, vy]."""
+        """Set velocity [vx, vy, vz]."""
+        if len(value) < 3:
+            vel = np.zeros(3)
+            vel[: len(value)] = value
+            value = vel
         self.data.qvel[0] = value[0]
         self.data.qvel[1] = value[1]
+        self.data.qvel[2] = value[2]
         mujoco.mj_forward(self.model, self.data)
 
     @property
