@@ -17,6 +17,12 @@ from src.satellite_control.visualization.unified_visualizer import (
     PlotStyle,
     UnifiedVisualizationGenerator,
 )
+from src.satellite_control.visualization.shape_utils import (
+    get_demo_shape,
+    load_dxf_shape,
+    make_offset_path,
+    transform_shape,
+)
 
 __all__ = [
     "UnifiedVisualizationGenerator",

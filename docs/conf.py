@@ -46,10 +46,13 @@ autodoc_default_options = {
     "members": True,
     "member-order": "bysource",
     "special-members": "__init__",
-    "undoc-members": True,
-    "exclude-members": "__weakref__",
+    "undoc-members": False,  # Don't show undocumented members by default
+    "exclude-members": "__weakref__,__dict__,__module__",
+    "show-inheritance": True,
 }
 autodoc_typehints = "description"
+autodoc_typehints_format = "short"
+autodoc_mock_imports = ["mujoco", "osqp", "gurobipy"]  # Mock external dependencies
 
 # -- Options for HTML output -------------------------------------------------
 html_theme = "sphinx_rtd_theme"

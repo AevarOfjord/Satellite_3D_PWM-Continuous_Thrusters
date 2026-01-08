@@ -125,9 +125,22 @@ class SimulationVisualizationManager:
         self.max_simulation_time = None
         self.data_save_path = None
 
-        # Import Config here to avoid circular imports
+        # Import SatelliteConfig at function level to avoid scope issues
         from src.satellite_control.config import SatelliteConfig
+        from src.satellite_control.config.mission_state import create_mission_state
 
+        # Get config from controller's simulation_config if available
+        # Otherwise fall back to SatelliteConfig for backward compatibility
+        if hasattr(controller, "simulation_config"):
+            self.app_config = controller.simulation_config.app_config
+            self.mission_state = controller.simulation_config.mission_state
+        else:
+            # Backward compatibility
+            self.app_config = SatelliteConfig.get_app_config()
+            self.mission_state = create_mission_state()
+
+        # Keep SatelliteConfig reference for backward compatibility
+        # (will be removed in future phase)
         self.SatelliteConfig = SatelliteConfig
 
     def sync_from_controller(self):
@@ -293,7 +306,15 @@ class SimulationVisualizationManager:
 
     def _draw_obstacles(self):
         """Draw configured obstacles on the visualization."""
-        if self.SatelliteConfig.OBSTACLES_ENABLED:
+        # Use mission_state or SatelliteConfig for obstacles
+        # Note: Obstacles not yet in AppConfig, so fall back to SatelliteConfig
+        # TODO: Add obstacles to AppConfig in future refactor
+        obstacles_enabled = (
+            getattr(self.SatelliteConfig, "OBSTACLES_ENABLED", False)
+            if hasattr(self.SatelliteConfig, "OBSTACLES_ENABLED")
+            else False
+        )
+        if obstacles_enabled:
             obstacles = self.SatelliteConfig.get_obstacles()
             for i, (obs_x, obs_y, obs_radius) in enumerate(obstacles, 1):
                 # Draw obstacle as red circle
@@ -308,7 +329,12 @@ class SimulationVisualizationManager:
                 self.satellite.ax_main.add_patch(obstacle_circle)
 
                 # Draw safety zone as red dashed circle
-                safety_radius = obs_radius + self.SatelliteConfig.OBSTACLE_AVOIDANCE_SAFETY_MARGIN
+                # Note: OBSTACLE_AVOIDANCE_SAFETY_MARGIN not yet in AppConfig
+                # TODO: Add to AppConfig in future refactor
+                safety_margin = getattr(
+                    self.SatelliteConfig, "OBSTACLE_AVOIDANCE_SAFETY_MARGIN", 0.1
+                )
+                safety_radius = obs_radius + safety_margin
                 safety_circle = patches.Circle(
                     (obs_x, obs_y),
                     safety_radius,

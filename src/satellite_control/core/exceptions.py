@@ -11,6 +11,8 @@ Exception categories:
 - Hardware/Communication errors: Device connection and communication failures
 - Mission/State errors: Mission execution and state validation issues
 - Safety errors: Collision detection and safety boundary violations
+
+See also: error_handling.py for error handling utilities and decorators.
 """
 
 from typing import Any

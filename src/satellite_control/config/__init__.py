@@ -28,13 +28,21 @@ from .mission_state import MissionState
 from .mpc_params import MPCConfig, get_mpc_params
 from .obstacles import ObstacleManager
 from .physics import PhysicsConfig, get_physics_params
+from .presets import (
+    ConfigPreset,
+    get_preset_description,
+    list_presets,
+    load_preset,
+)
 from .satellite_config import (
     SatelliteConfig,
     StructuredConfig,
     build_structured_config,
     use_structured_config,
 )
+from .simulation_config import SimulationConfig
 from .timing import TimingConfig, get_timing_params
+from .validator import ConfigValidator, validate_config_at_startup
 
 __all__ = [
     "PhysicsConfig",
@@ -50,4 +58,11 @@ __all__ = [
     "build_structured_config",  # For testing
     "StructuredConfig",  # Structured configuration
     "use_structured_config",  # Configuration context manager
+    "ConfigValidator",  # Configuration validator
+    "validate_config_at_startup",  # Startup validation function
+    "ConfigPreset",  # Configuration preset names
+    "get_preset_description",  # Get preset description
+    "list_presets",  # List all presets
+    "load_preset",  # Load preset configuration
+    "SimulationConfig",  # Immutable simulation configuration container
 ]

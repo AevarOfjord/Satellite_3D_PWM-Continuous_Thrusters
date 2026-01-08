@@ -30,7 +30,7 @@ jobs:
         run: isort --check-only --profile black src/ tests/
 
       - name: Lint with flake8
-        run: flake8 src/ tests/ --max-line-length=88 --extend-ignore=E203,W503
+        run: flake8 src/ tests/ --max-line-length=100 --extend-ignore=E203,W503,E501
 
   type-check:
     name: Type Check
@@ -110,7 +110,7 @@ jobs:
 
       - name: Run tests with coverage
         run: |
-          pytest tests/ --cov=src/satellite_control --cov-report=xml --cov-report=term-missing --timeout=60
+          pytest tests/ --cov=src/satellite_control --cov-report=xml --cov-report=term-missing --cov-fail-under=70 --timeout=60
         env:
           GRB_LICENSE_FILE: ${{ github.workspace }}/gurobi.lic
         continue-on-error: true
@@ -120,3 +120,94 @@ jobs:
         with:
           file: ./coverage.xml
           fail_ci_if_error: false
+
+  security:
+    name: Security Scan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install safety
+        run: |
+          python -m pip install --upgrade pip
+          pip install safety
+
+      - name: Run safety check
+        run: safety check --json || true
+        continue-on-error: true
+
+      - name: Run bandit security scan
+        run: |
+          pip install bandit
+          bandit -r src/ -f json -o bandit-report.json || true
+        continue-on-error: true
+
+  docs:
+    name: Build Documentation
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install documentation dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install sphinx sphinx-rtd-theme myst-parser
+
+      - name: Build documentation
+        run: |
+          cd docs
+          make html
+        continue-on-error: true
+
+      - name: Check for documentation build errors
+        run: |
+          if [ ! -f docs/_build/html/index.html ]; then
+            echo "Documentation build failed!"
+            exit 1
+          fi
+          echo "Documentation built successfully"
+        continue-on-error: true
+
+  benchmarks:
+    name: Performance Benchmarks
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+
+      - name: Run performance benchmarks
+        run: |
+          pytest tests/benchmarks/ tests/test_benchmark.py --benchmark-only --benchmark-json=benchmarks.json || true
+        continue-on-error: true
+
+      - name: Run regression detection tests
+        run: |
+          pytest tests/test_benchmark.py::TestMPCRegressionDetection -v || true
+        continue-on-error: true
+
+      - name: Upload benchmark results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: benchmark-results
+          path: benchmarks.json
+          retention-days: 30

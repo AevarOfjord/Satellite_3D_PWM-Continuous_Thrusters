@@ -8,6 +8,7 @@ import numpy as np
 import pytest
 
 from src.satellite_control.config import SatelliteConfig
+from src.satellite_control.config.validator import ConfigValidator
 
 
 class TestSatelliteConfigValidation:
@@ -307,6 +308,92 @@ class TestSatelliteConfigIntegration:
         """Test that print_thruster_forces executes without error."""
         # This should not raise any exceptions
         SatelliteConfig.print_thruster_forces()
+
+
+class TestConfigValidator:
+    """Test comprehensive configuration validator."""
+
+    def test_validator_validates_default_config(self):
+        """Test that default configuration passes validation."""
+        from src.satellite_control.config import SatelliteConfig
+
+        app_config = SatelliteConfig.get_app_config()
+        validator = ConfigValidator()
+        issues = validator.validate_all(app_config)
+
+        # Default config should be valid
+        assert len(issues) == 0, f"Default config has validation issues: {issues}"
+
+    def test_validator_detects_invalid_mass(self):
+        """Test that validator detects invalid mass."""
+        from src.satellite_control.config.models import AppConfig, MPCParams, SatellitePhysicalParams, SimulationParams
+
+        # Create config with invalid mass
+        invalid_config = AppConfig(
+            physics=SatellitePhysicalParams(
+                total_mass=-1.0,  # Invalid: negative mass
+                moment_of_inertia=0.312,
+                satellite_size=0.29,
+                com_offset=(0.0, 0.0, 0.0),
+                thruster_positions={1: (0.1, 0.1, 0.0)},
+                thruster_directions={1: (1.0, 0.0, 0.0)},
+                thruster_forces={1: 0.45},
+            ),
+            mpc=MPCParams(
+                prediction_horizon=15,
+                control_horizon=12,
+                dt=0.06,
+                solver_time_limit=0.05,
+                solver_type="OSQP",
+                q_position=1000.0,
+                q_velocity=1750.0,
+                q_angle=1000.0,
+                q_angular_velocity=1500.0,
+                r_thrust=1.0,
+                max_velocity=0.15,
+                max_angular_velocity=1.57,
+                position_bounds=3.0,
+                damping_zone=0.1,
+                velocity_threshold=0.03,
+                max_velocity_weight=100.0,
+                thruster_type="PWM",
+            ),
+            simulation=SimulationParams(
+                dt=0.005,
+                max_duration=500.0,
+                headless=True,
+                window_width=700,
+                window_height=600,
+            ),
+        )
+
+        validator = ConfigValidator()
+        issues = validator.validate_all(invalid_config)
+
+        # Should detect invalid mass
+        assert len(issues) > 0, "Validator should detect invalid mass"
+        assert any("mass" in issue.lower() for issue in issues), "Should report mass issue"
+
+    def test_validator_detects_invalid_mpc_horizon(self):
+        """Test that validator detects invalid MPC horizon."""
+        from src.satellite_control.config import SatelliteConfig
+        from src.satellite_control.config.models import AppConfig
+
+        app_config = SatelliteConfig.get_app_config()
+
+        # Create invalid config with control horizon > prediction horizon
+        invalid_config = AppConfig(
+            physics=app_config.physics,
+            mpc=app_config.mpc.model_copy(update={"control_horizon": 20, "prediction_horizon": 15}),
+            simulation=app_config.simulation,
+        )
+
+        validator = ConfigValidator()
+        issues = validator.validate_all(invalid_config)
+
+        # Should detect invalid horizon relationship
+        assert len(issues) > 0, "Validator should detect invalid horizon"
+        assert any("horizon" in issue.lower() for issue in issues), "Should report horizon issue"
 
 
 # Mark all tests in this file as unit tests

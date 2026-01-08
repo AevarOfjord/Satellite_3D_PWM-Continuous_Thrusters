@@ -35,6 +35,7 @@ import logging
 import numpy as np
 
 from src.satellite_control.config import SatelliteConfig
+from src.satellite_control.config.mission_state import MissionState
 from src.satellite_control.utils.orientation_utils import (
     euler_xyz_to_quat_wxyz,
     quat_angle_error,
@@ -59,6 +60,7 @@ class MissionStateManager:
         point_to_line_distance_func: Optional[
             Callable[[np.ndarray, np.ndarray, np.ndarray], float]
         ] = None,
+        mission_state: Optional[MissionState] = None,
     ):
         """
         Initialize mission state manager.
@@ -69,6 +71,7 @@ class MissionStateManager:
             normalize_angle_func: Function to normalize angles to [-pi, pi]
             angle_difference_func: Function to calculate angle difference
             point_to_line_distance_func: Point-to-line distance function
+            mission_state: Optional MissionState (preferred, eliminates global state)
         """
         self.position_tolerance = position_tolerance
         self.angle_tolerance = angle_tolerance
@@ -79,6 +82,10 @@ class MissionStateManager:
         self.point_to_line_distance = (
             point_to_line_distance_func or self._default_point_to_line_distance
         )
+        
+        # Use provided mission_state or fall back to creating new one
+        # Note: If None, will read from SatelliteConfig (backward compatibility)
+        self.mission_state = mission_state
 
         # Mission state tracking
         self.current_nav_waypoint_idx: int = 0
@@ -102,6 +109,71 @@ class MissionStateManager:
         self.spline_arc_progress: float = 0.0
         self.spline_cruise_speed: float = 0.12  # m/s along spline
         self._active_obstacle: Optional[Tuple[float, float, float]] = None
+    
+    def _get_current_waypoint_target(self) -> Tuple[Optional[Tuple[float, float, float]], Optional[Tuple[float, float, float]]]:
+        """
+        Get current waypoint target from mission_state or SatelliteConfig.
+        
+        Returns:
+            Tuple of (target_pos, target_angle) or (None, None)
+        """
+        if self.mission_state is not None:
+            # Use mission_state (preferred)
+            targets = self.mission_state.waypoint_targets or self.mission_state.multi_point_targets
+            angles = self.mission_state.waypoint_angles or self.mission_state.multi_point_angles
+            
+            if not targets or self.mission_state.current_target_index >= len(targets):
+                return None, None
+            
+            target_pos = targets[self.mission_state.current_target_index]
+            # Handle angle format (could be single float or tuple)
+            target_angle_raw = angles[self.mission_state.current_target_index]
+            if isinstance(target_angle_raw, (int, float)):
+                target_angle = (0.0, 0.0, float(target_angle_raw))
+            else:
+                target_angle = target_angle_raw
+            
+            return target_pos, target_angle
+        else:
+            # Backward compatibility: use SatelliteConfig
+            return SatelliteConfig.get_current_waypoint_target()
+    
+    def _advance_to_next_target(self) -> bool:
+        """
+        Advance to next waypoint target in mission_state or SatelliteConfig.
+        
+        Returns:
+            True if advanced, False if all targets completed
+        """
+        if self.mission_state is not None:
+            # Use mission_state (preferred)
+            targets = self.mission_state.waypoint_targets or self.mission_state.multi_point_targets
+            if not targets:
+                return False
+            
+            self.mission_state.current_target_index += 1
+            self.mission_state.target_stabilization_start_time = None
+            
+            if self.mission_state.current_target_index >= len(targets):
+                return False
+            return True
+        else:
+            # Backward compatibility: use SatelliteConfig
+            return SatelliteConfig.advance_to_next_target()
+    
+    def _get_current_target_index(self) -> int:
+        """Get current target index from mission_state or SatelliteConfig."""
+        if self.mission_state is not None:
+            return self.mission_state.current_target_index
+        else:
+            return getattr(SatelliteConfig, "CURRENT_TARGET_INDEX", 0)
+    
+    def _get_waypoint_targets(self) -> List[Tuple[float, float, float]]:
+        """Get waypoint targets from mission_state or SatelliteConfig."""
+        if self.mission_state is not None:
+            return self.mission_state.waypoint_targets or self.mission_state.multi_point_targets
+        else:
+            return getattr(SatelliteConfig, "WAYPOINT_TARGETS", [])
 
     def _create_3d_state(
         self,
@@ -166,23 +238,39 @@ class MissionStateManager:
         current_quat = current_state[3:7]
 
         # Determine active mode
-        is_dxf = (
-            hasattr(SatelliteConfig, "DXF_SHAPE_MODE_ACTIVE")
-            and SatelliteConfig.DXF_SHAPE_MODE_ACTIVE
-        )
+        # Use mission_state if available, otherwise fall back to SatelliteConfig
+        if self.mission_state is not None:
+            is_dxf = self.mission_state.dxf_shape_mode_active
+        else:
+            # Backward compatibility: read from SatelliteConfig
+            is_dxf = (
+                hasattr(SatelliteConfig, "DXF_SHAPE_MODE_ACTIVE")
+                and SatelliteConfig.DXF_SHAPE_MODE_ACTIVE
+            )
 
         # 3D Position for internal logic
         curr_pos_3d = current_state[:3]
 
         if is_dxf:
             # --- SHAPE FOLLOWING PREDICTION ---
-            path: List[Tuple[float, float, float]] = SatelliteConfig.DXF_SHAPE_PATH
-            phase = getattr(SatelliteConfig, "DXF_SHAPE_PHASE", "POSITIONING")
-            start_time = getattr(SatelliteConfig, "DXF_TRACKING_START_TIME", None)
-
-            if phase == "TRACKING" and start_time is not None:
+            # Use mission_state if available, otherwise fall back to SatelliteConfig
+            if self.mission_state is not None:
+                path = self.mission_state.dxf_shape_path
+                phase = self.mission_state.dxf_shape_phase
+                start_time = self.mission_state.dxf_tracking_start_time
+                speed = self.mission_state.dxf_target_speed
+                path_len = max(self.mission_state.dxf_path_length, 1e-9)
+                closest_point_idx = self.mission_state.dxf_closest_point_index
+            else:
+                # Backward compatibility: read from SatelliteConfig
+                path: List[Tuple[float, float, float]] = SatelliteConfig.DXF_SHAPE_PATH
+                phase = getattr(SatelliteConfig, "DXF_SHAPE_PHASE", "POSITIONING")
+                start_time = getattr(SatelliteConfig, "DXF_TRACKING_START_TIME", None)
                 speed = SatelliteConfig.DXF_TARGET_SPEED
                 path_len = max(getattr(SatelliteConfig, "DXF_PATH_LENGTH", 0.0), 1e-9)
+                closest_point_idx = getattr(SatelliteConfig, "DXF_CLOSEST_POINT_INDEX", 0)
+
+            if phase == "TRACKING" and start_time is not None:
 
                 from src.satellite_control.mission.mission_manager import (
                     get_path_tangent_orientation,
@@ -198,12 +286,12 @@ class MissionStateManager:
                         current_path_position, _ = get_position_on_path(
                             path,
                             path_len,
-                            SatelliteConfig.DXF_CLOSEST_POINT_INDEX,
+                            closest_point_idx,
                         )
                         target_orientation = get_path_tangent_orientation(
                             path,
                             path_len,
-                            SatelliteConfig.DXF_CLOSEST_POINT_INDEX,
+                            closest_point_idx,
                         )
                         trajectory[k] = self._create_3d_state(
                             current_path_position[0],
@@ -215,12 +303,12 @@ class MissionStateManager:
                         pos, _ = get_position_on_path(
                             path,
                             wrapped_s,
-                            SatelliteConfig.DXF_CLOSEST_POINT_INDEX,
+                            closest_point_idx,
                         )
                         orient = get_path_tangent_orientation(
                             path,
                             wrapped_s,
-                            SatelliteConfig.DXF_CLOSEST_POINT_INDEX,
+                            closest_point_idx,
                         )
                         vx = speed * np.cos(orient)
                         vy = speed * np.sin(orient)
@@ -364,17 +452,36 @@ class MissionStateManager:
             Target state vector [pos(3), quat(4), vel(3), w(3)] or None
         """
         # Waypoint mode
-        if (
+        # Use mission_state if available, otherwise fall back to SatelliteConfig
+        enable_waypoint = False
+        if self.mission_state is not None:
+            enable_waypoint = (
+                self.mission_state.enable_waypoint_mode
+                or self.mission_state.enable_multi_point_mode
+            )
+        else:
+            # Backward compatibility
+            enable_waypoint = (
             hasattr(SatelliteConfig, "ENABLE_WAYPOINT_MODE")
             and SatelliteConfig.ENABLE_WAYPOINT_MODE
-        ):
+            )
+        
+        if enable_waypoint:
             return self._handle_multi_point_mode(current_position, current_quat, current_time)
 
         # DXF shape mode
-        elif (
+        # Use mission_state if available, otherwise fall back to SatelliteConfig
+        is_dxf = False
+        if self.mission_state is not None:
+            is_dxf = self.mission_state.dxf_shape_mode_active
+        else:
+            # Backward compatibility
+            is_dxf = (
             hasattr(SatelliteConfig, "DXF_SHAPE_MODE_ACTIVE")
             and SatelliteConfig.DXF_SHAPE_MODE_ACTIVE
-        ):
+            )
+        
+        if is_dxf:
             return self._handle_dxf_shape_mode(current_position, current_quat, current_time)
 
         # Point-to-point mode (no-op, handled by caller)
@@ -387,12 +494,12 @@ class MissionStateManager:
         current_time: float,
     ) -> Optional[np.ndarray]:
         """Handle waypoint sequential navigation mode."""
-        final_target_pos, final_target_angle = SatelliteConfig.get_current_waypoint_target()
+        final_target_pos, final_target_angle = self._get_current_waypoint_target()
         if final_target_pos is None:
             return None
 
         # --- Obstacle Avoidance Logic ---
-        current_target_index = SatelliteConfig.CURRENT_TARGET_INDEX
+        current_target_index = self._get_current_target_index()
 
         # Check if target changed or we need to clear old path
         if current_target_index != self.last_target_index:
@@ -493,12 +600,12 @@ class MissionStateManager:
             if self.multi_point_target_reached_time is None:
                 self.multi_point_target_reached_time = current_time
                 logger.info(
-                    f" TARGET {SatelliteConfig.CURRENT_TARGET_INDEX + 1} " "REACHED! Stabilizing..."
+                    f" TARGET {self._get_current_target_index() + 1} " "REACHED! Stabilizing..."
                 )
             else:
+                targets = self._get_waypoint_targets()
                 is_final_target = (
-                    SatelliteConfig.CURRENT_TARGET_INDEX
-                    >= len(SatelliteConfig.WAYPOINT_TARGETS) - 1
+                    self._get_current_target_index() >= len(targets) - 1
                 )
 
                 if is_final_target:
@@ -509,13 +616,13 @@ class MissionStateManager:
                 maintenance_time = current_time - self.multi_point_target_reached_time
                 if maintenance_time >= required_hold_time:
                     # Advance to next target
-                    next_available = SatelliteConfig.advance_to_next_target()
+                    next_available = self._advance_to_next_target()
                     if next_available:
                         (
                             new_target_pos,
                             new_target_angle,
-                        ) = SatelliteConfig.get_current_waypoint_target()
-                        idx = SatelliteConfig.CURRENT_TARGET_INDEX + 1
+                        ) = self._get_current_waypoint_target()
+                        idx = self._get_current_target_index() + 1
                         px, py = new_target_pos[0], new_target_pos[1]
                         p_z = new_target_pos[2]
                         logger.info(

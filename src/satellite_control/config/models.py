@@ -217,6 +217,10 @@ class MPCParams(BaseModel):
         "PWM",
         description="Thruster actuation type: 'PWM' (Binary) or 'CON' (Continuous)",
     )
+    verbose_mpc: bool = Field(
+        False,
+        description="Enable verbose MPC solver output",
+    )
 
     @field_validator("thruster_type")
     @classmethod

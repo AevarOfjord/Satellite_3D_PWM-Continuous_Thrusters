@@ -483,7 +483,7 @@ class MuJoCoSatelliteSimulator:
         # simulation.py calls this for visualization.
 
         # Re-implementing logic:
-        from src.satellite_control.config import SatelliteConfig
+        # Note: SatelliteConfig is already imported at module level
 
         for thruster_id in range(1, 13):
             force_magnitude = self.get_thrust_force(thruster_id)

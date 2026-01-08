@@ -1,0 +1,39 @@
+version: '3.8'
+
+services:
+  satellite-sim:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: satellite-control:latest
+    container_name: satellite-simulation
+    volumes:
+      # Mount data directory for outputs
+      - ./Data:/app/Data
+      # Mount config if you have custom configs
+      # - ./config:/app/config
+    environment:
+      - PYTHONUNBUFFERED=1
+      - MUJOCO_GL=egl
+    # Override default command
+    command: ["python", "run_simulation.py", "run", "--headless", "--duration", "10.0"]
+    # For interactive use, uncomment:
+    # stdin_open: true
+    # tty: true
+
+  # Development service with mounted source code
+  satellite-dev:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: satellite-control:dev
+    container_name: satellite-development
+    volumes:
+      - .:/app
+      - ./Data:/app/Data
+    environment:
+      - PYTHONUNBUFFERED=1
+      - MUJOCO_GL=egl
+    command: ["python", "run_simulation.py", "run", "--headless"]
+    # For development, you can override with:
+    # docker-compose run satellite-dev python run_simulation.py run --help

@@ -33,6 +33,7 @@ The individual thruster forces are automatically used by all controllers
 
 from contextlib import contextmanager
 from typing import Any, Dict, List, Optional, Tuple
+import warnings
 
 import numpy as np
 
@@ -85,6 +86,7 @@ def _create_default_config() -> AppConfig:
         velocity_threshold=mpc_params.VELOCITY_THRESHOLD,
         max_velocity_weight=mpc_params.MAX_VELOCITY_WEIGHT,
         thruster_type=mpc_params.THRUSTER_TYPE,
+        verbose_mpc=mpc_params.VERBOSE_MPC,
     )
 
     # Simulation
@@ -145,12 +147,39 @@ def use_structured_config(config):
         pass
 
 
+def _deprecated_attribute_warning(attr_name: str, alternative: str, version: str = "2.0.0"):
+    """
+    Issue deprecation warning for mutable attribute access.
+    
+    Args:
+        attr_name: Name of the deprecated attribute
+        alternative: Recommended alternative approach
+        version: Version when attribute will be removed
+    """
+    warnings.warn(
+        f"SatelliteConfig.{attr_name} is deprecated and will be removed in v{version}. "
+        f"Use {alternative} instead. See docs/CONFIG_MIGRATION_GUIDE.md for details.",
+        DeprecationWarning,
+        stacklevel=3,
+    )
+
+
 class SatelliteConfig:
     """
     Backward-compatible facade for satellite configuration.
 
     This class maintains the same interface as the original SatelliteConfig
     while delegating to the new modular configuration system.
+
+    .. deprecated:: 1.0.0
+       Mutable class attributes (ENABLE_WAYPOINT_MODE, WAYPOINT_TARGETS, DXF_SHAPE_MODE_ACTIVE,
+       OBSTACLES_ENABLED, etc.) are deprecated. Use `SimulationConfig` and `MissionState` instead.
+       See docs/CONFIG_MIGRATION_GUIDE.md for migration instructions.
+
+    Migration Guide:
+        Old: SatelliteConfig.ENABLE_WAYPOINT_MODE = True
+        New: mission_state.enable_waypoint_mode = True
+              (via SimulationConfig.mission_state)
     """
 
     # Global Pydantic Configuration
@@ -284,43 +313,49 @@ class SatelliteConfig:
     # ========================================================================
     # MISSION 1: WAYPOINT NAVIGATION (supports single or multiple waypoints)
     # ========================================================================
-    ENABLE_WAYPOINT_MODE = False
-    WAYPOINT_TARGETS: List[Tuple[float, float]] = []
-    WAYPOINT_ANGLES: List[Tuple[float, float, float]] = []
-    CURRENT_TARGET_INDEX = 0
-    MULTI_POINT_PHASE: Optional[str] = None
-    TARGET_STABILIZATION_START_TIME = None
-    WAYPOINT_PHASE = None
+    # DEPRECATED: These mutable class attributes are deprecated.
+    # Use MissionState via SimulationConfig.mission_state instead.
+    # Will be removed in v2.0.0. See docs/CONFIG_MIGRATION_GUIDE.md
+    ENABLE_WAYPOINT_MODE = False  # type: ignore
+    WAYPOINT_TARGETS: List[Tuple[float, float]] = []  # type: ignore
+    WAYPOINT_ANGLES: List[Tuple[float, float, float]] = []  # type: ignore
+    CURRENT_TARGET_INDEX = 0  # type: ignore
+    MULTI_POINT_PHASE: Optional[str] = None  # type: ignore
+    TARGET_STABILIZATION_START_TIME = None  # type: ignore
+    WAYPOINT_PHASE = None  # type: ignore
 
     # ========================================================================
     # MISSION 2: SHAPE FOLLOWING (circles, rectangles, triangles, hexagons,
     # DXF)
     # ========================================================================
+    # DEPRECATED: These mutable class attributes are deprecated.
+    # Use MissionState via SimulationConfig.mission_state instead.
+    # Will be removed in v2.0.0. See docs/CONFIG_MIGRATION_GUIDE.md
     # Note: Shape following uses DXF_SHAPE_MODE_ACTIVE and related fields below
     # DXF shape mode
-    DXF_SHAPE_MODE_ACTIVE = False
-    DXF_SHAPE_CENTER = None
-    DXF_SHAPE_PATH: List[Tuple[float, float]] = []
-    DXF_BASE_SHAPE: List[Tuple[float, float]] = []
-    DXF_MISSION_START_TIME = None
-    DXF_SHAPE_PHASE = "POSITIONING"
-    DXF_PATH_LENGTH = 0.0
-    DXF_CLOSEST_POINT_INDEX = 0
-    DXF_CURRENT_TARGET_POSITION = None
-    DXF_POSITIONING_START_TIME = None  # Track time in POSITIONING phase
-    DXF_PATH_STABILIZATION_START_TIME = None  # Track time in PATH_STABILIZATION phase
-    DXF_TRACKING_START_TIME = None
-    DXF_TARGET_START_DISTANCE = 0.0
-    DXF_STABILIZATION_START_TIME = None
-    DXF_FINAL_POSITION = None
-    DXF_SHAPE_ROTATION = 0.0
-    DXF_HAS_RETURN = False
-    DXF_RETURN_POSITION = None
-    DXF_RETURN_ANGLE = None
-    DXF_RETURN_START_TIME = None
-    DXF_TARGET_SPEED = 0.1
-    DXF_ESTIMATED_DURATION = 60.0
-    DXF_OFFSET_DISTANCE = 0.5
+    DXF_SHAPE_MODE_ACTIVE = False  # type: ignore
+    DXF_SHAPE_CENTER = None  # type: ignore
+    DXF_SHAPE_PATH: List[Tuple[float, float]] = []  # type: ignore
+    DXF_BASE_SHAPE: List[Tuple[float, float]] = []  # type: ignore
+    DXF_MISSION_START_TIME = None  # type: ignore
+    DXF_SHAPE_PHASE = "POSITIONING"  # type: ignore
+    DXF_PATH_LENGTH = 0.0  # type: ignore
+    DXF_CLOSEST_POINT_INDEX = 0  # type: ignore
+    DXF_CURRENT_TARGET_POSITION = None  # type: ignore
+    DXF_POSITIONING_START_TIME = None  # type: ignore
+    DXF_PATH_STABILIZATION_START_TIME = None  # type: ignore
+    DXF_TRACKING_START_TIME = None  # type: ignore
+    DXF_TARGET_START_DISTANCE = 0.0  # type: ignore
+    DXF_STABILIZATION_START_TIME = None  # type: ignore
+    DXF_FINAL_POSITION = None  # type: ignore
+    DXF_SHAPE_ROTATION = 0.0  # type: ignore
+    DXF_HAS_RETURN = False  # type: ignore
+    DXF_RETURN_POSITION = None  # type: ignore
+    DXF_RETURN_ANGLE = None  # type: ignore
+    DXF_RETURN_START_TIME = None  # type: ignore
+    DXF_TARGET_SPEED = 0.1  # type: ignore
+    DXF_ESTIMATED_DURATION = 60.0  # type: ignore
+    DXF_OFFSET_DISTANCE = 0.5  # type: ignore
 
     # ========================================================================
     # OBSTACLE AVOIDANCE
@@ -328,8 +363,11 @@ class SatelliteConfig:
 
     _obstacle_manager = obstacles.create_obstacle_manager()
 
-    OBSTACLES_ENABLED = False
-    OBSTACLES: List[Tuple[float, float, float]] = []
+    # DEPRECATED: These mutable class attributes are deprecated.
+    # Use MissionState via SimulationConfig.mission_state instead.
+    # Will be removed in v2.0.0. See docs/CONFIG_MIGRATION_GUIDE.md
+    OBSTACLES_ENABLED = False  # type: ignore
+    OBSTACLES: List[Tuple[float, float, float]] = []  # type: ignore
     DEFAULT_OBSTACLE_RADIUS = obstacles.DEFAULT_OBSTACLE_RADIUS
     OBSTACLE_SAFETY_MARGIN = obstacles.OBSTACLE_SAFETY_MARGIN
     MIN_OBSTACLE_DISTANCE = obstacles.MIN_OBSTACLE_DISTANCE
@@ -472,7 +510,18 @@ class SatelliteConfig:
 
     @classmethod
     def set_waypoint_mode(cls, enable: bool):
-        """Enable or disable waypoint navigation mode (single or multiple)."""
+        """
+        Enable or disable waypoint navigation mode (single or multiple).
+        
+        .. deprecated:: 1.0.0
+           Use MissionState.enable_waypoint_mode instead.
+           This method will be removed in v2.0.0.
+           See docs/CONFIG_MIGRATION_GUIDE.md for migration instructions.
+        """
+        _deprecated_attribute_warning(
+            "set_waypoint_mode()",
+            "MissionState.enable_waypoint_mode or SimulationConfig.mission_state.enable_waypoint_mode"
+        )
         cls.ENABLE_WAYPOINT_MODE = enable
         if enable:
             print("Waypoint navigation mode enabled")
@@ -481,7 +530,17 @@ class SatelliteConfig:
 
     @classmethod
     def set_multi_point_mode(cls, enable: bool):
-        """Backward-compatible alias for enabling waypoint mode."""
+        """
+        Backward-compatible alias for enabling waypoint mode.
+        
+        .. deprecated:: 1.0.0
+           Use MissionState.enable_waypoint_mode instead.
+           This method will be removed in v2.0.0.
+        """
+        _deprecated_attribute_warning(
+            "set_multi_point_mode()",
+            "MissionState.enable_waypoint_mode or SimulationConfig.mission_state.enable_waypoint_mode"
+        )
         cls.set_waypoint_mode(enable)
 
     @staticmethod
@@ -491,7 +550,18 @@ class SatelliteConfig:
 
     @classmethod
     def set_waypoint_targets(cls, target_points: list, target_angles: list):
-        """Set waypoint target points and orientations."""
+        """
+        Set waypoint target points and orientations.
+        
+        .. deprecated:: 1.0.0
+           Use MissionState.waypoint_targets and MissionState.waypoint_angles instead.
+           This method will be removed in v2.0.0.
+           See docs/CONFIG_MIGRATION_GUIDE.md for migration instructions.
+        """
+        _deprecated_attribute_warning(
+            "set_waypoint_targets()",
+            "MissionState.waypoint_targets and MissionState.waypoint_angles"
+        )
         if len(target_points) != len(target_angles):
             raise ValueError("Number of target points and angles must match")
 
@@ -593,6 +663,18 @@ class SatelliteConfig:
 
     @classmethod
     def set_obstacles(cls, obstacles_list: list):
+        """
+        Set obstacle list for collision avoidance.
+        
+        .. deprecated:: 1.0.0
+           Use MissionState.obstacles or ObstacleManager instead.
+           This method will be removed in v2.0.0.
+           See docs/CONFIG_MIGRATION_GUIDE.md for migration instructions.
+        """
+        _deprecated_attribute_warning(
+            "set_obstacles()",
+            "MissionState.obstacles or ObstacleManager.set_obstacles()"
+        )
         """Set obstacles for all navigation modes."""
         cls._obstacle_manager.set_obstacles(obstacles_list)
         cls.OBSTACLES = cls._obstacle_manager.get_obstacles()
@@ -712,7 +794,15 @@ class SatelliteConfig:
 
         Call this between simulations or tests to ensure clean state.
         This addresses the mutable class attribute anti-pattern.
+        
+        .. deprecated:: 1.0.0
+           With SimulationConfig, each simulation has its own state.
+           No reset needed. This method will be removed in v2.0.0.
         """
+        _deprecated_attribute_warning(
+            "reset_mission_state()",
+            "Create new SimulationConfig for each simulation (no reset needed)"
+        )
         # Waypoint navigation state
         cls.ENABLE_WAYPOINT_MODE = False
         cls.WAYPOINT_TARGETS = []

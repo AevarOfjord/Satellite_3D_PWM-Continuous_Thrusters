@@ -1,0 +1,85 @@
+# Git
+.git
+.gitignore
+.gitattributes
+
+# Python
+__pycache__
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+env/
+ENV/
+.venv
+*.egg-info/
+dist/
+build/
+*.egg
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+.hypothesis/
+
+# Documentation
+docs/_build/
+docs/.doctrees/
+
+# Data and outputs
+Data/
+*.log
+*.csv
+*.mp4
+*.png
+*.jpg
+*.json
+!package.json
+!package-lock.json
+
+# CI/CD
+.github/
+.circleci/
+
+# Docker
+Dockerfile*
+docker-compose*.yml
+.dockerignore
+
+# Documentation
+*.md
+!README.md
+
+# Temporary files
+*.tmp
+*.bak
+*.swp
+.cache/
+
+# OS
+Thumbs.db
+.DS_Store
+
+# Pre-commit
+.pre-commit-config.yaml
+
+# Benchmarks
+benchmarks.json
+*.benchmark
+
+# Improvement docs
+IMPROVEMENT_PLAN.md
+IMPROVEMENTS_COMPLETED.md
+REMAINING_IMPROVEMENTS.md
+QUICK_START_IMPROVEMENTS.md

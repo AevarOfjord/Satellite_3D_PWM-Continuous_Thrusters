@@ -13,7 +13,11 @@ import osqp
 import scipy.sparse as sp
 
 from src.satellite_control.config import SatelliteConfig
+from src.satellite_control.config import mpc_params
 from src.satellite_control.config.models import MPCParams, SatellitePhysicalParams
+from src.satellite_control.core.error_handling import with_error_context
+from src.satellite_control.core.exceptions import OptimizationError, SolverTimeoutError
+from src.satellite_control.utils.caching import cached
 
 
 logger = logging.getLogger(__name__)
@@ -98,7 +102,20 @@ class MPCController:
         # Precompute thruster forces (body frame)
         self._precompute_thruster_forces()
 
-        if SatelliteConfig.VERBOSE_MPC:
+        # Precompute Q_diag (used frequently in get_control_action)
+        self.Q_diag = np.concatenate(
+            [
+                np.full(3, self.Q_pos),
+                np.full(4, self.Q_ang),
+                np.full(3, self.Q_vel),
+                np.full(3, self.Q_angvel),
+            ]
+        )
+
+        # Use verbose flag from mpc_params
+        self.verbose = get_param(mpc_params, "verbose_mpc", "VERBOSE_MPC", False)
+        
+        if self.verbose:
             print("OSQP MPC Controller Initializing (3D)...")
 
         # Problem dimensions
@@ -120,7 +137,7 @@ class MPCController:
         # State tracking for updates
         self.prev_quat = np.array([-999.0] * 4)  # Forces update
 
-        if SatelliteConfig.VERBOSE_MPC:
+        if self.verbose:
             print("OSQP MPC Ready.")
 
     def _precompute_thruster_forces(self) -> None:
@@ -143,8 +160,30 @@ class MPCController:
             self.body_frame_forces[i] = force
             self.body_frame_torques[i] = np.cross(rel_pos, force)
 
+    @cached(maxsize=128)
+    def _compute_rotation_matrix(self, quat_tuple: tuple) -> np.ndarray:
+        """
+        Compute rotation matrix from quaternion (cached).
+        
+        Args:
+            quat_tuple: Quaternion as tuple (for hashing)
+            
+        Returns:
+            3x3 rotation matrix
+        """
+        import mujoco
+
+        qv = np.array(quat_tuple)
+        R = np.zeros(9)
+        mujoco.mju_quat2Mat(R, qv)
+        return R.reshape(3, 3)
+
     def linearize_dynamics(self, x_current: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
-        """Linearize dynamics around current state (quaternion)."""
+        """
+        Linearize dynamics around current state (quaternion).
+        
+        Uses caching for expensive rotation matrix computation.
+        """
         # x = [px, py, pz, qw, qx, qy, qz, vx, vy, vz, wx, wy, wz]
         # Indices:
         # P: 0-2 (3)
@@ -154,8 +193,11 @@ class MPCController:
 
         qv = x_current[3:7]  # Current quaternion
 
-        # In a strict sense, we should cache based on qv.
-        # But constructing A and B is fast enough.
+        # Round quaternion to reduce cache size (binning for similar orientations)
+        quat_rounded = tuple(np.round(qv, decimals=3))
+        
+        # Use cached rotation matrix computation
+        R = self._compute_rotation_matrix(quat_rounded)
 
         # State transition A (13 x 13)
         A = np.eye(13)
@@ -166,46 +208,12 @@ class MPCController:
         A[2, 9] = self.dt
 
         # dQuat/dOmega = 0.5 * G(q) * dt
-        # G(q) maps 3D omega to 4D q_dot
-        # q_dot = 0.5 * [-x -y -z; w -z y; z w -x; -y x w] * omega  (Scalar first notation?)
-        # Let's use standard: q = [w, x, y, z]
-        # q_dot = 0.5 * [ -x*wx - y*wy - z*wz;
-        #                  w*wx - z*wy + y*wz;
-        #                  z*wx + w*wy - x*wz;
-        #                 -y*wx + x*wy + w*wz ]
-
         w, x, y, z = qv[0], qv[1], qv[2], qv[3]
-
         G = 0.5 * np.array([[-x, -y, -z], [w, -z, y], [z, w, -x], [-y, x, w]]) * self.dt
-
         A[3:7, 10:13] = G
 
         # Control input B (13 x 12)
         B = np.zeros((13, 12))
-
-        # Force: F_world = R(q) * F_body
-        # R(q) is rotation matrix from body to world.
-        # R = [1-2(y^2+z^2), 2(xy-zw), 2(xz+yw); ...]
-        # Simple transform.
-
-        # B_vel = (1/m) * R * F_body * dt
-        # B_omega = (I_inv) * T_body * dt (Actually T_body is already in body frame, do we need R?
-        # Euler eq: I w_dot + w x I w = T_ext.
-        # w_dot = I_inv (T_ext - w x I w).
-        # In body frame!
-        # Simulation usually tracks w in body frame?
-        # Standard: q tracks Body->World. w is in Body frame.
-        # If w is in body frame, then I is constant diagonal.
-        # If w is in world, I changes.
-        # simulation.py usually tracks q (Body->World) and w (Body frame).
-        # Let's assume w is Body frame. Then Torque is Body frame.
-        # So B_omega does NOT depend on q. constant B_omega.
-
-        import mujoco
-
-        R = np.zeros(9)
-        mujoco.mju_quat2Mat(R, qv)
-        R = R.reshape(3, 3)
 
         for i in range(12):
             # Velocity update (World frame) -> Force rotated
@@ -215,13 +223,6 @@ class MPCController:
 
             # Angular velocity update (Body frame) -> Torque in body
             T_body = self.body_frame_torques[i]
-            # Assuming diagonal inertia for simplicity or full inverse
-            # I_inv T * dt
-            # If I is just scalar/diagonal in code?
-            # I = self.moment_of_inertia (scalar J).
-            # Ideally assume 1/J.
-            # If 3D, Inertia should be tensor. But config has scalar.
-            # We treat it as sphere/cube diagonal I = J * Eye(3).
             B[10:13, i] = T_body / self.moment_of_inertia * self.dt
 
         return A, B
@@ -369,6 +370,7 @@ class MPCController:
                 for idx in indices:
                     self.A.data[idx] = val
 
+    @with_error_context("MPC solve", reraise=True)
     def get_control_action(
         self,
         x_current: np.ndarray,
@@ -403,14 +405,8 @@ class MPCController:
 
         self.q.fill(0.0)
 
-        Q_diag = np.concatenate(
-            [
-                np.full(3, self.Q_pos),
-                np.full(4, self.Q_ang),
-                np.full(3, self.Q_vel),
-                np.full(3, self.Q_angvel),
-            ]
-        )
+        # Use precomputed Q_diag
+        Q_diag = self.Q_diag
 
         # Terminal weight
         Q_term = Q_diag * 10.0
@@ -442,13 +438,31 @@ class MPCController:
         self.prob.update(q=self.q, l=self.l, u=self.u)
 
         # Solve
-        res = self.prob.solve()
+        try:
+            res = self.prob.solve()
+        except Exception as e:
+            logger.error(f"OSQP solver raised exception: {e}")
+            raise OptimizationError("solver_exception", f"OSQP solver failed: {e}")
 
         solve_time = time.time() - start_time
         self.solve_times.append(solve_time)
 
+        # Check for timeout
+        if solve_time > self.solver_time_limit:
+            logger.warning(
+                f"MPC solve time ({solve_time:.3f}s) exceeded limit ({self.solver_time_limit:.3f}s)"
+            )
+            # Don't raise - use fallback instead
+            return self._get_fallback_control(x_curr_mpc, x_targ_mpc), {
+                "status": -1,
+                "solve_time": solve_time,
+                "timeout": True,
+            }
+
         if res.info.status not in ["solved", "solved_inaccurate"]:
-            return self._get_fallback_control(x_curr_mpc, x_targ_mpc), {"status": -1}
+            status_msg = res.info.status if hasattr(res.info, "status") else "unknown"
+            logger.warning(f"MPC solver status: {status_msg}")
+            raise OptimizationError(status_msg, f"Solver returned status: {status_msg}")
 
         u_idx = (self.N + 1) * self.nx
         u_opt = res.x[u_idx : u_idx + self.nu]

@@ -230,5 +230,245 @@ class TestStateValidationEdgeCases:
         assert distance >= 0
 
 
+# ============================================================================
+# Navigation Utilities Property Tests
+# ============================================================================
+
+
+@pytest.mark.unit
+class TestNavigationUtilsProperties:
+    """Property-based tests for navigation utilities."""
+
+    @given(
+        angle1=st.floats(-10 * np.pi, 10 * np.pi, allow_nan=False),
+        angle2=st.floats(-10 * np.pi, 10 * np.pi, allow_nan=False),
+    )
+    @settings(max_examples=100)
+    def test_angle_difference_symmetric(self, angle1, angle2):
+        """Angle difference should be symmetric (within sign)."""
+        from src.satellite_control.utils.navigation_utils import angle_difference
+
+        diff1 = angle_difference(angle1, angle2)
+        diff2 = angle_difference(angle2, angle1)
+
+        # Should be negatives of each other (within floating point precision)
+        assert abs(diff1 + diff2) < 1e-10 or abs(abs(diff1) - abs(diff2)) < 1e-10
+
+    @given(
+        angle=st.floats(-10 * np.pi, 10 * np.pi, allow_nan=False),
+    )
+    @settings(max_examples=100)
+    def test_normalize_angle_idempotent(self, angle):
+        """Normalizing an already normalized angle should be idempotent."""
+        from src.satellite_control.utils.navigation_utils import normalize_angle
+
+        normalized_once = normalize_angle(angle)
+        normalized_twice = normalize_angle(normalized_once)
+
+        assert abs(normalized_once - normalized_twice) < 1e-10
+
+    @given(
+        point_x=st.floats(-5.0, 5.0, allow_nan=False),
+        point_y=st.floats(-5.0, 5.0, allow_nan=False),
+        line_x1=st.floats(-5.0, 5.0, allow_nan=False),
+        line_y1=st.floats(-5.0, 5.0, allow_nan=False),
+        line_x2=st.floats(-5.0, 5.0, allow_nan=False),
+        line_y2=st.floats(-5.0, 5.0, allow_nan=False),
+    )
+    @settings(max_examples=50)
+    def test_point_to_line_distance_non_negative(
+        self, point_x, point_y, line_x1, line_y1, line_x2, line_y2
+    ):
+        """Point-to-line distance should always be non-negative."""
+        from src.satellite_control.utils.navigation_utils import point_to_line_distance
+
+        point = np.array([point_x, point_y])
+        line_start = np.array([line_x1, line_y1])
+        line_end = np.array([line_x2, line_y2])
+
+        distance = point_to_line_distance(point, line_start, line_end)
+        assert distance >= 0
+
+
+# ============================================================================
+# Orientation Utilities Property Tests
+# ============================================================================
+
+
+@pytest.mark.unit
+class TestOrientationUtilsProperties:
+    """Property-based tests for orientation utilities."""
+
+    @given(
+        roll=st.floats(-np.pi, np.pi, allow_nan=False),
+        pitch=st.floats(-np.pi / 2, np.pi / 2, allow_nan=False),
+        yaw=st.floats(-np.pi, np.pi, allow_nan=False),
+    )
+    @settings(max_examples=100)
+    def test_euler_quat_roundtrip(self, roll, pitch, yaw):
+        """Euler to quaternion and back should be idempotent."""
+        from src.satellite_control.utils.orientation_utils import (
+            euler_xyz_to_quat_wxyz,
+            quat_wxyz_to_euler_xyz,
+        )
+
+        euler = (roll, pitch, yaw)
+        quat = euler_xyz_to_quat_wxyz(euler)
+        euler_back = quat_wxyz_to_euler_xyz(quat)
+
+        # Should be close (within reasonable tolerance for gimbal lock cases)
+        assert np.allclose(euler, euler_back, atol=1e-5) or np.allclose(
+            np.array(euler) + np.array([0, 0, 2 * np.pi]), euler_back, atol=1e-5
+        )
+
+    @given(
+        roll=st.floats(-np.pi, np.pi, allow_nan=False),
+        pitch=st.floats(-np.pi / 2, np.pi / 2, allow_nan=False),
+        yaw=st.floats(-np.pi, np.pi, allow_nan=False),
+    )
+    @settings(max_examples=100)
+    def test_quaternion_normalized(self, roll, pitch, yaw):
+        """Quaternions from Euler angles should be normalized."""
+        from src.satellite_control.utils.orientation_utils import euler_xyz_to_quat_wxyz
+
+        euler = (roll, pitch, yaw)
+        quat = euler_xyz_to_quat_wxyz(euler)
+
+        # Quaternion should be unit length
+        quat_norm = np.linalg.norm(quat)
+        assert abs(quat_norm - 1.0) < 1e-10
+
+    @given(
+        qw=st.floats(-1.0, 1.0, allow_nan=False),
+        qx=st.floats(-1.0, 1.0, allow_nan=False),
+        qy=st.floats(-1.0, 1.0, allow_nan=False),
+        qz=st.floats(-1.0, 1.0, allow_nan=False),
+    )
+    @settings(max_examples=50)
+    def test_quat_angle_error_symmetric(self, qw, qx, qy, qz):
+        """Quaternion angle error should be symmetric."""
+        from src.satellite_control.utils.orientation_utils import quat_angle_error
+
+        # Normalize quaternion
+        quat1 = np.array([qw, qx, qy, qz])
+        quat1_norm = np.linalg.norm(quat1)
+        if quat1_norm > 1e-10:
+            quat1 = quat1 / quat1_norm
+        else:
+            quat1 = np.array([1.0, 0.0, 0.0, 0.0])
+
+        quat2 = np.array([1.0, 0.0, 0.0, 0.0])  # Identity
+
+        error1 = quat_angle_error(quat1, quat2)
+        error2 = quat_angle_error(quat2, quat1)
+
+        # Should be the same (symmetric)
+        assert abs(error1 - error2) < 1e-10
+
+
+# ============================================================================
+# State Validation Property Tests
+# ============================================================================
+
+
+@pytest.mark.unit
+class TestStateValidationProperties:
+    """Property-based tests for state validation."""
+
+    @given(
+        pos_x=st.floats(-5.0, 5.0, allow_nan=False),
+        pos_y=st.floats(-5.0, 5.0, allow_nan=False),
+        pos_z=st.floats(-5.0, 5.0, allow_nan=False),
+    )
+    @settings(max_examples=50)
+    def test_state_validation_deterministic(self, pos_x, pos_y, pos_z):
+        """State validation should be deterministic."""
+        from src.satellite_control.utils.simulation_state_validator import (
+            create_state_validator_from_config,
+        )
+        from src.satellite_control.utils.orientation_utils import euler_xyz_to_quat_wxyz
+
+        validator = create_state_validator_from_config()
+
+        state = np.zeros(13)
+        state[0:3] = np.array([pos_x, pos_y, pos_z])
+        state[3:7] = euler_xyz_to_quat_wxyz((0.0, 0.0, 0.0))
+
+        result1 = validator.validate_state_format(state)
+        result2 = validator.validate_state_format(state)
+
+        assert result1 == result2
+
+    @given(
+        state_list=st.lists(
+            st.floats(-10.0, 10.0, allow_nan=False), min_size=13, max_size=13
+        ),
+    )
+    @settings(max_examples=50)
+    def test_state_format_validation(self, state_list):
+        """State format validation should handle various inputs."""
+        from src.satellite_control.utils.simulation_state_validator import (
+            create_state_validator_from_config,
+        )
+
+        validator = create_state_validator_from_config()
+        state = np.array(state_list)
+
+        # Should not raise exception
+        result = validator.validate_state_format(state)
+        assert isinstance(result, bool)
+
+
+# ============================================================================
+# Caching Property Tests
+# ============================================================================
+
+
+@pytest.mark.unit
+class TestCachingProperties:
+    """Property-based tests for caching utilities."""
+
+    @given(
+        value=st.integers(0, 1000),
+    )
+    @settings(max_examples=20)
+    def test_cached_function_deterministic(self, value):
+        """Cached functions should return same result for same input."""
+        from src.satellite_control.utils.caching import cached
+
+        call_count = [0]
+
+        @cached(maxsize=10)
+        def test_func(x):
+            call_count[0] += 1
+            return x * 2
+
+        result1 = test_func(value)
+        result2 = test_func(value)
+
+        # Should return same result
+        assert result1 == result2
+        # Should only call function once (cached)
+        assert call_count[0] == 1
+
+    @given(
+        value1=st.integers(0, 100),
+        value2=st.integers(0, 100),
+    )
+    @settings(max_examples=20)
+    def test_cached_function_different_inputs(self, value1, value2):
+        """Cached functions should handle different inputs correctly."""
+        from src.satellite_control.utils.caching import cached
+
+        @cached(maxsize=10)
+        def test_func(x):
+            return x * 2
+
+        if value1 != value2:
+            result1 = test_func(value1)
+            result2 = test_func(value2)
+            assert result1 != result2 or value1 == value2
+
+
 # Mark all tests in this file
 pytestmark = pytest.mark.unit

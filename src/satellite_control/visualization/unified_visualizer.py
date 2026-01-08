@@ -34,6 +34,12 @@ from matplotlib.patches import Circle
 from mpl_toolkits.mplot3d.art3d import Poly3DCollection
 
 from src.satellite_control.config import SatelliteConfig
+from src.satellite_control.visualization.shape_utils import (
+    get_demo_shape,
+    load_dxf_shape,
+    make_offset_path,
+    transform_shape,
+)
 
 matplotlib.use("Agg")  # Use non-interactive backend
 
@@ -217,7 +223,10 @@ class UnifiedVisualizationGenerator:
         self.real_time = True  # Enable real-time animation
         self.dt: Optional[float] = None  # Simulation timestep (will be auto-detected)
 
-        self.satellite_size = SatelliteConfig.SATELLITE_SIZE
+        # Get satellite size from config
+        # Note: For standalone usage, fall back to SatelliteConfig
+        # When used from simulation, should get from simulation_config
+        self.satellite_size = SatelliteConfig.SATELLITE_SIZE  # TODO: Accept as parameter
         self.satellite_color = "blue"
         self.target_color = "red"
         self.trajectory_color = "cyan"
@@ -231,6 +240,10 @@ class UnifiedVisualizationGenerator:
             self.thrusters[thruster_id] = pos
 
         self.thruster_forces = SatelliteConfig.THRUSTER_FORCES.copy()
+
+        # Initialize component generators (lazy initialization)
+        self._plot_generator: Optional[Any] = None
+        self._video_renderer: Optional[Any] = None
 
         if load_data:
             if interactive:
@@ -246,7 +259,7 @@ class UnifiedVisualizationGenerator:
         self.plot_prefix = "Simulation"
         self.animation_title = "MPC Satellite Simulation Visualization"
         self.trajectory_title = "MPC - Satellite Trajectory"
-        self.frame_title_template = "MPC - Frame {}"
+        self.frame_title_template = "MPC - Frame {frame}"
 
     def find_newest_data(self) -> None:
         """Find the newest data folder and CSV file."""
@@ -1157,10 +1170,7 @@ class UnifiedVisualizationGenerator:
         return []
 
     def generate_animation(self, output_filename: Optional[str] = None) -> None:
-        """Generate and save the MP4 animation using parallel rendering + imageio.
-
-        Uses ProcessPoolExecutor for parallel frame rendering (fast),
-        then imageio to assemble frames into MP4 (simple, no ffmpeg subprocess).
+        """Generate and save the MP4 animation using VideoRenderer.
 
         Args:
             output_filename: Name of output MP4 file (optional)
@@ -1172,216 +1182,8 @@ class UnifiedVisualizationGenerator:
         if output_filename is None:
             output_filename = f"{self.plot_prefix}_animation.mp4"
 
-        print(f"\n{'=' * 60}")
-        print(f"GENERATING {self.system_name.upper()} ANIMATION (PARALLEL)")
-        print(f"{'=' * 60}")
-
-        # Calculate number of frames
-        total_frames = self._get_len() // int(self.speedup_factor)
-        if total_frames == 0:
-            total_frames = 1
-
-        print("Animation parameters:")
-        print(f"  - Total data points: {self._get_len()}")
-        print(f"  - Animation frames: {total_frames}")
-        print(f"  - Frame rate: {self.fps} FPS")
-        print(f"  - Speedup factor: {self.speedup_factor}x")
-        print(f"  - Animation duration: {total_frames / self.fps:.1f} seconds")
-
-        import multiprocessing
-        from concurrent.futures import ProcessPoolExecutor
-
-        import imageio
-
-        # Prepare configuration for workers
-        if self._data_backend == "pandas" and self.data is not None:
-            data_dict = {col: self.data[col].values for col in self.data.columns}
-        elif self._col_data is not None:
-            data_dict = self._col_data
-        else:
-            raise ValueError("No data available for animation")
-
-        # Config dictionary to reconstruct state in workers
-        config = {
-            "dt": self.dt,
-            "fps": self.fps,
-            "speedup_factor": self.speedup_factor,
-            "system_title": self.system_title,
-            "frame_title_template": self.frame_title_template,
-            "satellite_size": self.satellite_size,
-            "satellite_color": self.satellite_color,
-            "target_color": self.target_color,
-            "trajectory_color": self.trajectory_color,
-            "thrusters": self.thrusters,
-            "dxf_base_shape": self.dxf_base_shape,
-            "dxf_offset_path": self.dxf_offset_path,
-            "dxf_center": self.dxf_center,
-            "dxf_mode_active": getattr(SatelliteConfig, "DXF_SHAPE_MODE_ACTIVE", False),
-            "overlay_dxf": self.overlay_dxf,
-            "obstacles_enabled": getattr(SatelliteConfig, "OBSTACLES_ENABLED", False),
-            "obstacles_list": (
-                SatelliteConfig.get_obstacles()
-                if getattr(SatelliteConfig, "OBSTACLES_ENABLED", False)
-                else []
-            ),
-            "data_directory": str(self.data_directory),
-        }
-
-        # Pass sibling control data if available (for Mission Phase info)
-        if hasattr(self, "control_data") and self.control_data is not None:
-            # Convert DataFrame to dict for pickling safety/simplicity
-            config["control_data_dict"] = self.control_data.to_dict(orient="list")
-        else:
-            config["control_data_dict"] = None
-
-        # Use absolute path to ensure file is saved correctly
-        output_path = Path(self.output_dir).resolve() / output_filename
-
-        # Use temp directory in output folder (subprocesses need absolute paths)
-        # Create a unique frames subdirectory that we'll clean up afterward
-        import uuid
-
-        frames_dir = Path(self.output_dir).resolve() / f"_frames_{uuid.uuid4().hex[:8]}"
-        frames_dir.mkdir(parents=True, exist_ok=True)
-
-        try:
-            print(
-                f"\nRendering {total_frames} frames using "
-                f"{multiprocessing.cpu_count()} cores..."
-            )
-
-            frames = list(range(total_frames))
-
-            # Parallel frame rendering - use absolute path for frames directory
-            temp_dir = str(frames_dir)
-            with ProcessPoolExecutor() as executor:
-                results_iterator = executor.map(
-                    UnifiedVisualizationGenerator._render_frame_task,
-                    [(f, temp_dir, data_dict, config) for f in frames],
-                )
-
-                try:
-                    from tqdm import tqdm
-
-                    futures = list(
-                        tqdm(
-                            results_iterator,
-                            total=total_frames,
-                            unit="frames",
-                            desc="Rendering Frames",
-                            ncols=80,
-                        )
-                    )
-                except ImportError:
-                    futures = []
-                    print("Rendering frames (tqdm not installed)...")
-                    for i, res in enumerate(results_iterator):
-                        futures.append(res)
-                        if i % 10 == 0 or i == total_frames - 1:
-                            sys.stdout.write(f"\rProcessed {i+1}/{total_frames} frames")
-                            sys.stdout.flush()
-                    print()
-
-            # Assemble video with imageio (simpler than ffmpeg subprocess)
-            print("Assembling video with imageio...")
-
-            # Use exact FPS for precise real-time playback
-            fps_for_video = max(1.0, self.fps)
-
-            # Ensure imageio finds the system ffmpeg
-            import shutil
-
-            ffmpeg_path = shutil.which("ffmpeg")
-            if ffmpeg_path:
-                os.environ["IMAGEIO_FFMPEG_EXE"] = ffmpeg_path
-
-            try:
-                with imageio.get_writer(
-                    str(output_path),
-                    fps=fps_for_video,
-                    macro_block_size=1,  # Avoid resizing warnings
-                    quality=8,
-                ) as writer:
-                    for frame_idx in range(total_frames):
-                        frame_path = os.path.join(temp_dir, f"frame_{frame_idx:05d}.png")
-                        if os.path.exists(frame_path):
-                            frame = imageio.imread(frame_path)
-                            writer.append_data(frame)  # type: ignore[attr-defined]
-
-                print("\n Animation saved successfully!")
-                print(f" File location: {output_path}")
-            except Exception as e:
-                print(f"Error assembling video: {e}")
-                raise
-        finally:
-            # Clean up frames directory
-            import shutil
-
-            if frames_dir.exists():
-                shutil.rmtree(frames_dir)
-
-    @staticmethod
-    def _render_frame_task(args):
-        """Worker function to render a single frame (runs in separate process)."""
-        frame_idx, output_dir, data_dict, config = args
-
-        try:
-            global _worker_gen_cache
-            # Check if cache is None (it is always in globals as it's defined at module level)
-            if _worker_gen_cache is None:
-                # Initialize generator in worker process
-                gen = UnifiedVisualizationGenerator(config["data_directory"], load_data=False)
-                gen._col_data = data_dict
-                gen._data_backend = "csv"
-
-                # Inject config
-                gen.dt = config["dt"]
-                gen.fps = config["fps"]
-                gen.speedup_factor = config["speedup_factor"]
-                gen.system_title = config["system_title"]
-                gen.frame_title_template = config["frame_title_template"]
-
-                # Restore control data if provided
-                if config.get("control_data_dict"):
-                    try:
-                        import pandas as pd
-
-                        gen.control_data = pd.DataFrame(config["control_data_dict"])
-                    except ImportError:
-                        pass
-
-                gen.satellite_size = config["satellite_size"]
-                gen.satellite_color = config["satellite_color"]
-                gen.target_color = config["target_color"]
-                gen.trajectory_color = config["trajectory_color"]
-                gen.thrusters = config["thrusters"]
-                gen.dxf_base_shape = config["dxf_base_shape"]
-                gen.dxf_offset_path = config["dxf_offset_path"]
-                gen.dxf_center = config["dxf_center"]
-
-                SatelliteConfig.DXF_SHAPE_MODE_ACTIVE = config["dxf_mode_active"]
-                SatelliteConfig.OBSTACLES_ENABLED = config["obstacles_enabled"]
-                if config["obstacles_enabled"] and config.get("obstacles_list"):
-                    SatelliteConfig.set_obstacles(config["obstacles_list"])
-                gen.overlay_dxf = config["overlay_dxf"]
-
-                gen.setup_plot()
-                _worker_gen_cache = gen
-            else:
-                gen = _worker_gen_cache
-
-            if gen is not None:
-                gen.animate_frame(frame_idx)
-                filename = os.path.join(output_dir, f"frame_{frame_idx:05d}.png")
-                if gen.fig is not None:
-                    gen.fig.savefig(filename, dpi=100)
-        except Exception:
-            import traceback
-
-            traceback.print_exc()
-            return False
-
-        return True
+        video_renderer = self._get_video_renderer()
+        video_renderer.generate_animation(output_filename)
 
     def _progress_callback(self, current_frame: int, total_frames: int) -> None:
         """Progress callback for animation saving with visual progress bar.
@@ -1401,35 +1203,64 @@ class UnifiedVisualizationGenerator:
             flush=True,
         )
 
+    def _get_plot_generator(self):
+        """Get or create PlotGenerator instance (lazy initialization)."""
+        if self._plot_generator is None:
+            from src.satellite_control.visualization.plot_generator import PlotGenerator
+
+            assert self.dt is not None, "dt must be set before generating plots"
+            self._plot_generator = PlotGenerator(
+                data_accessor=self,
+                dt=self.dt,
+                system_title=self.system_title,
+            )
+        return self._plot_generator
+
+    def _get_video_renderer(self):
+        """Get or create VideoRenderer instance (lazy initialization)."""
+        if self._video_renderer is None:
+            from src.satellite_control.visualization.video_renderer import VideoRenderer
+
+            assert self.dt is not None, "dt must be set before generating animation"
+            assert self.fps is not None, "fps must be set before generating animation"
+            assert self.output_dir is not None, "output_dir must be set before generating animation"
+
+            self._video_renderer = VideoRenderer(
+                data_accessor=self,
+                dt=self.dt,
+                fps=self.fps,
+                output_dir=self.output_dir,
+                system_title=self.system_title,
+                speedup_factor=self.speedup_factor,
+                satellite_size=self.satellite_size,
+                satellite_color=self.satellite_color,
+                target_color=self.target_color,
+                trajectory_color=self.trajectory_color,
+                thrusters=self.thrusters,
+                dxf_base_shape=self.dxf_base_shape,
+                dxf_offset_path=self.dxf_offset_path,
+                dxf_center=self.dxf_center,
+                overlay_dxf=self.overlay_dxf,
+                frame_title_template=self.frame_title_template,
+            )
+        return self._video_renderer
+
     def generate_performance_plots(self) -> None:
         """Generate performance analysis plots."""
         assert self.dt is not None, "dt must be set before generating plots"
         assert self.output_dir is not None, "output_dir must be set before generating plots"
 
-        print("Generating performance analysis plots...")
-
-        # Create Plots subfolder
         plots_dir = self.output_dir / "Plots"
-        plots_dir.mkdir(exist_ok=True)
-        print(f" Created Plots directory: {plots_dir}")
+        plot_generator = self._get_plot_generator()
+        plot_generator.generate_all_plots(plots_dir)
 
-        # Generate specific performance plots
-        self._generate_position_tracking_plot(plots_dir)
-        self._generate_position_error_plot(plots_dir)
-        self._generate_angular_tracking_plot(plots_dir)
-        self._generate_angular_error_plot(plots_dir)
-        self._generate_trajectory_plot(plots_dir)
-        self._generate_trajectory_3d_interactive_plot(plots_dir)
-        self._generate_thruster_usage_plot(plots_dir)
-        self._generate_thruster_valve_activity_plot(plots_dir)
-        self._generate_pwm_quantization_plot(plots_dir)
-        self._generate_control_effort_plot(plots_dir)
-        self._generate_velocity_tracking_plot(plots_dir)
-        self._generate_velocity_magnitude_plot(plots_dir)
-        self._generate_mpc_performance_plot(plots_dir)
-        self._generate_timing_intervals_plot(plots_dir)
-
-        print(f"Performance plots saved to: {plots_dir}")
+    # ========================================================================
+    # Legacy Plotting Methods (Deprecated)
+    # ========================================================================
+    # These methods are kept for backward compatibility but are no longer
+    # used. All plotting functionality has been migrated to PlotGenerator.
+    # These methods will be removed in a future version.
+    # ========================================================================
 
     def _generate_position_tracking_plot(self, plot_dir: Path) -> None:
         """Generate position tracking over time plot."""
@@ -2777,138 +2608,8 @@ class LinearizedVisualizationGenerator(UnifiedVisualizationGenerator):
         super().__init__(data_directory)
 
 
-def get_demo_shape(shape_type: str) -> List[tuple]:
-    """Get predefined demo shape points (matches Mission.py implementation)."""
-    if shape_type == "rectangle":
-        # 0.4m x 0.3m rectangle centered at origin
-        return [
-            (-0.2, -0.15),
-            (0.2, -0.15),
-            (0.2, 0.15),
-            (-0.2, 0.15),
-            (-0.2, -0.15),  # Close the shape
-        ]
-    elif shape_type == "triangle":
-        # Equilateral triangle with 0.4m sides
-        return [(0.0, 0.2), (-0.173, -0.1), (0.173, -0.1), (0.0, 0.2)]
-    elif shape_type == "hexagon":
-        # Regular hexagon with 0.2m radius
-        points = []
-        for i in range(7):  # 7 points to close the shape
-            angle = i * np.pi / 3
-            x = 0.2 * np.cos(angle)
-            y = 0.2 * np.sin(angle)
-            points.append((x, y))
-        return points
-    else:
-        # Default to rectangle
-        return get_demo_shape("rectangle")
-
-
-def transform_shape(points: List[tuple], center: tuple, rotation: float) -> List[tuple]:
-    """Transform shape points to specified center and rotation."""
-    transformed = []
-    cos_r = np.cos(rotation)
-    sin_r = np.sin(rotation)
-
-    for x, y in points:
-        # Rotate
-        x_rot = x * cos_r - y * sin_r
-        y_rot = x * sin_r + y * cos_r
-
-        # Translate
-        x_final = x_rot + center[0]
-        y_final = y_rot + center[1]
-
-        transformed.append((x_final, y_final))
-
-    return transformed
-
-
-def make_offset_path(points: List[tuple], offset_distance: float) -> List[tuple]:
-    """Create an outward offset path (matches Mission.py implementation)."""
-    if len(points) < 3:
-        return points
-
-    # Try to use DXF_Viewer's make_offset_path if available
-    try:
-        from DXF.dxf_viewer import make_offset_path as viewer_make_offset_path
-
-        return viewer_make_offset_path(
-            points,
-            float(offset_distance),
-            1.0,
-            join="round",
-            resolution=24,
-            mode="buffer",
-        )
-    except Exception:
-        pass
-
-    # Fallback: simple centroid-based offset
-    pts = points[:]
-    if np.linalg.norm(np.array(pts[0]) - np.array(pts[-1])) > 1e-8:
-        pts = pts + [pts[0]]
-
-    # Calculate shape centroid
-    centroid_x = np.mean([p[0] for p in pts])
-    centroid_y = np.mean([p[1] for p in pts])
-    centroid = np.array([centroid_x, centroid_y])
-
-    upscaled = []
-    for i in range(len(pts) - 1):
-        current = np.array(pts[i])
-        next_point = np.array(pts[i + 1])
-
-        edge_vec = next_point - current
-        edge_normal = np.array([-edge_vec[1], edge_vec[0]])
-        if np.linalg.norm(edge_normal) > 0:
-            edge_normal = edge_normal / np.linalg.norm(edge_normal)
-
-        mid_point = (current + next_point) / 2
-        to_mid = mid_point - centroid
-        if np.dot(edge_normal, to_mid) < 0:
-            edge_normal = -edge_normal
-
-        offset_current = current + edge_normal * offset_distance
-        upscaled.append(tuple(offset_current))
-
-    if np.linalg.norm(np.array(pts[0]) - np.array(pts[-1])) < 1e-6:
-        upscaled.append(upscaled[0])
-
-    return upscaled
-
-
-def load_dxf_shape(dxf_path: str) -> List[tuple]:
-    """Load shape points from DXF file using DXF_Viewer pipeline (matches Mission.py)."""
-    import ezdxf
-
-    try:
-        from DXF.dxf_viewer import (
-            extract_boundary_polygon,
-            sanitize_boundary,
-            units_code_to_name_and_scale,
-        )
-    except Exception as e:
-        raise ImportError(f"dxf_viewer utilities unavailable: {e}")
-
-    # Read DXF and determine units
-    doc = ezdxf.readfile(dxf_path)
-    msp = doc.modelspace()
-    insunits = int(doc.header.get("$INSUNITS", 0))
-    units_name, to_m = units_code_to_name_and_scale(insunits)
-
-    # Extract and sanitize boundary in native units, then scale to meters
-    boundary = extract_boundary_polygon(msp)
-    boundary = sanitize_boundary(boundary, to_m)
-    boundary_m = [(float(x) * to_m, float(y) * to_m) for (x, y) in boundary] if boundary else []
-
-    if not boundary_m:
-        raise ValueError("No usable DXF boundary could be constructed.")
-
-    print(f" DXF Loaded: {len(boundary_m)} points")
-    print(f"   Units: {units_name} (INSUNITS={insunits}), scaled → meters (x{to_m})")
-    return boundary_m
+# Shape utility functions have been moved to shape_utils.py
+# Imported at the top of the file
 
 
 def configure_dxf_overlay_interactive() -> bool:

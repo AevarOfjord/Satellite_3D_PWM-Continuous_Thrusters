@@ -33,28 +33,30 @@ Configuration:
 - Consistent with real hardware configuration
 """
 
-import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 import matplotlib.pyplot as plt
 import numpy as np
-from matplotlib.animation import FuncAnimation
 
 from src.satellite_control.config import (
     SatelliteConfig,
+    SimulationConfig,
     StructuredConfig,
     build_structured_config,
     use_structured_config,
 )
 
+from src.satellite_control.config import SatelliteConfig
 from src.satellite_control.config.constants import Constants
 from src.satellite_control.config.satellite_config import (
     initialize_config,
 )
 from src.satellite_control.control.mpc_controller import MPCController
 from src.satellite_control.core.mujoco_satellite import SatelliteThrusterTester
+from src.satellite_control.core.simulation_initialization import SimulationInitializer
 from src.satellite_control.core.simulation_io import SimulationIO
+from src.satellite_control.core.simulation_loop import SimulationLoop
 from src.satellite_control.core.thruster_manager import ThrusterManager
 from src.satellite_control.mission.mission_report_generator import (
     create_mission_report_generator,
@@ -112,6 +114,13 @@ class SatelliteMPCLinearizedSimulation:
 
     Combines physics from TestingEnvironment with linearized MPC controller
     for satellite navigation using linearized dynamics.
+
+    This class now acts as a public API orchestrator, delegating to:
+    - SimulationInitializer: Handles all initialization logic
+    - SimulationLoop: Handles main loop execution
+    - Various managers: MPC, Mission, Thruster, etc.
+
+    The public API remains unchanged for backward compatibility.
     """
 
     def __init__(
@@ -126,6 +135,7 @@ class SatelliteMPCLinearizedSimulation:
         start_omega: float = 0.0,
         config: Optional[StructuredConfig] = None,
         config_overrides: Optional[Dict[str, Dict[str, Any]]] = None,
+        simulation_config: Optional[SimulationConfig] = None,
         use_mujoco_viewer: bool = True,
     ):
         """
@@ -140,16 +150,64 @@ class SatelliteMPCLinearizedSimulation:
             start_vy: Initial Y velocity in m/s (default: 0.0)
             start_vz: Initial Z velocity in m/s (default: 0.0)
             start_omega: Initial angular velocity (Z-spin) in rad/s (default: 0.0)
-            config: Optional structured config snapshot to run against
-            config_overrides: Nested override dict for build_structured_config
+            config: Optional structured config snapshot to run against (deprecated, use simulation_config)
+            config_overrides: Nested override dict for build_structured_config (deprecated, use simulation_config)
+            simulation_config: Optional SimulationConfig (preferred, eliminates global state)
             use_mujoco_viewer: If True, use MuJoCo viewer (default: True)
         """
         self.use_mujoco_viewer = use_mujoco_viewer
-        self.structured_config = (
-            config.clone() if config else build_structured_config(config_overrides)
-        )
+        
+        # Use SimulationConfig if provided (new preferred way)
+        if simulation_config is not None:
+            self.simulation_config = simulation_config
+            # Convert to structured_config for backward compatibility
+            self.structured_config = build_structured_config(
+                {
+                    "mpc": simulation_config.get_mpc_params(),
+                    "physics": simulation_config.get_physics_params(),
+                    "simulation": simulation_config.get_simulation_params(),
+                }
+            )
+        else:
+            # Backward compatibility: use old structured_config approach
+            self.structured_config = (
+                config.clone() if config else build_structured_config(config_overrides)
+            )
+            # Create SimulationConfig from structured_config for internal use
+            # This allows gradual migration
+            app_config = SatelliteConfig.get_app_config()
+            # Sync mission state from SatelliteConfig (backward compatibility)
+            # This allows CLI components to mutate SatelliteConfig and we sync it here
+            from src.satellite_control.config.mission_state import sync_mission_state_from_satellite_config
+            
+            mission_state = sync_mission_state_from_satellite_config()
+            
+            self.simulation_config = SimulationConfig(
+                app_config=app_config,
+                mission_state=mission_state,
+            )
+        
+        # Validate configuration if overrides were provided
+        if config_overrides:
+            from src.satellite_control.config.validator import ConfigValidator
+            
+            validator = ConfigValidator(self.simulation_config.app_config)
+            issues = validator.validate()
+            if issues:
+                logger.warning("Configuration validation issues detected:")
+                for issue in issues:
+                    logger.warning(f"  - {issue}")
+                # Don't raise - allow simulation to proceed with warnings
+                # This is less strict than startup validation
+        
+        # Use SimulationInitializer to handle all initialization
         with use_structured_config(self.structured_config.clone()):
-            self._initialize_from_active_config(
+            initializer = SimulationInitializer(
+                simulation=self,
+                simulation_config=self.simulation_config,
+                use_mujoco_viewer=self.use_mujoco_viewer,
+            )
+            initializer.initialize(
                 start_pos,
                 target_pos,
                 start_angle,
@@ -159,223 +217,6 @@ class SatelliteMPCLinearizedSimulation:
                 start_vz,
                 start_omega,
             )
-
-    def _initialize_from_active_config(
-        self,
-        start_pos: Optional[Tuple[float, ...]],
-        target_pos: Optional[Tuple[float, ...]],
-        start_angle: Optional[Tuple[float, float, float]],
-        target_angle: Optional[Tuple[float, float, float]],
-        start_vx: float = 0.0,
-        start_vy: float = 0.0,
-        start_vz: float = 0.0,
-        start_omega: float = 0.0,
-    ) -> None:
-        if start_pos is None:
-            start_pos = SatelliteConfig.DEFAULT_START_POS
-        if target_pos is None:
-            target_pos = SatelliteConfig.DEFAULT_TARGET_POS
-        if start_angle is None:
-            start_angle = SatelliteConfig.DEFAULT_START_ANGLE
-        if target_angle is None:
-            target_angle = SatelliteConfig.DEFAULT_TARGET_ANGLE
-
-        self.satellite = SatelliteThrusterTester(use_mujoco_viewer=self.use_mujoco_viewer)
-        self.satellite.external_simulation_mode = True
-
-        # Set initial state (including velocities)
-        # Ensure start_pos is 3D
-        sp = np.array(start_pos, dtype=np.float64)
-        if sp.shape == (2,):
-            sp = np.pad(sp, (0, 1), "constant")
-        self.satellite.position = sp
-
-        self.satellite.velocity = np.array([start_vx, start_vy, start_vz], dtype=np.float64)
-        self.satellite.angle = start_angle
-        # Type ignore: Property setter accepts float, getter returns ndarray
-        self.satellite.angular_velocity = start_omega  # type: ignore
-
-        # Store initial starting position and angle for reset functionality
-        self.initial_start_pos = sp.copy()
-        self.initial_start_angle = start_angle
-
-        # Point-to-point mode (3D State: [p(3), q(4), v(3), w(3)])
-        # Target State
-        self.target_state = np.zeros(13)
-
-        # Robust 3D target assignment
-        tp = np.array(target_pos, dtype=np.float64)
-        if tp.shape == (2,):
-            tp = np.pad(tp, (0, 1), "constant")
-        self.target_state[0:3] = tp
-
-        # Target Orientation (3D Euler -> Quaternion)
-        target_quat = euler_xyz_to_quat_wxyz(target_angle)
-        self.target_state[3:7] = target_quat
-        # Velocities = 0
-
-        logger.info(
-            f"INFO: POINT-TO-POINT MODE: "
-            f"Target ({target_pos[0]:.2f}, {target_pos[1]:.2f}, 0.00)"
-        )
-
-        # Simulation state
-        self.is_running = False
-        self.simulation_time = 0.0
-        self.max_simulation_time = SatelliteConfig.MAX_SIMULATION_TIME
-        self.control_update_interval = SatelliteConfig.CONTROL_DT
-        self.last_control_update = 0.0
-        self.next_control_simulation_time = 0.0  # Track next scheduled control update
-
-        # ===== HARDWARE COMMAND DELAY SIMULATION =====
-        # Simulates the delay between sending a command and
-        # thrusters actually firing
-        # Uses Config parameters for realistic physics when enabled
-        if SatelliteConfig.USE_REALISTIC_PHYSICS:
-            self.VALVE_DELAY = SatelliteConfig.THRUSTER_VALVE_DELAY  # 50ms valve open/close delay
-            self.THRUST_RAMPUP_TIME = (
-                SatelliteConfig.THRUSTER_RAMPUP_TIME
-            )  # 15ms ramp-up after valve opens
-        else:
-            self.VALVE_DELAY = 0.0  # Instant response for idealized physics
-            self.THRUST_RAMPUP_TIME = 0.0
-
-        # Thruster management (valve delays, ramp-up, PWM) - delegated
-        self.num_thrusters = len(SatelliteConfig.THRUSTER_POSITIONS)
-        self.thruster_manager = ThrusterManager(
-            num_thrusters=self.num_thrusters,
-            valve_delay=self.VALVE_DELAY,
-            thrust_rampup_time=self.THRUST_RAMPUP_TIME,
-            use_realistic_physics=SatelliteConfig.USE_REALISTIC_PHYSICS,
-            thruster_type=SatelliteConfig.THRUSTER_TYPE,
-        )
-
-        # Convenience aliases for backward compatibility (read-only access)
-        # These properties delegate to thruster_manager
-        # ==============================================
-
-        # Target maintenance tracking
-        self.target_reached_time: Optional[float] = None
-        self.approach_phase_start_time = 0.0
-        self.target_maintenance_time = 0.0
-        self.times_lost_target = 0
-        self.maintenance_position_errors: List[float] = []
-        self.maintenance_angle_errors: List[float] = []
-
-        # Data logging
-        self.state_history: List[np.ndarray] = []
-        self.command_history: List[List[int]] = []  # For visual replay
-        self.control_history: List[np.ndarray] = []
-        self.target_history: List[np.ndarray] = []
-        self.mpc_solve_times: List[float] = []
-        self.mpc_info_history: List[dict] = []
-
-        self.data_save_path: Optional[Path] = None
-
-        # Previous command for rate limiting
-        self.previous_command: Optional[np.ndarray] = None
-
-        # Current control
-        self.current_thrusters = np.zeros(self.num_thrusters, dtype=np.float64)
-        self.previous_thrusters = np.zeros(self.num_thrusters, dtype=np.float64)
-
-        self.position_tolerance = SatelliteConfig.POSITION_TOLERANCE
-        self.angle_tolerance = SatelliteConfig.ANGLE_TOLERANCE
-        self.velocity_tolerance = SatelliteConfig.VELOCITY_TOLERANCE
-        self.angular_velocity_tolerance = SatelliteConfig.ANGULAR_VELOCITY_TOLERANCE
-
-        # Initialize MPC Controller directly
-        logger.info("Initializing MPC Controller (Mode: PWM/OSQP)...")
-        app_config = SatelliteConfig.get_app_config()
-        self.mpc_controller = MPCController(
-            satellite_params=app_config.physics, mpc_params=app_config.mpc
-        )
-        # Initialize MissionStateManager for centralized mission logic
-        self.mission_manager = MissionStateManager(
-            position_tolerance=self.position_tolerance,
-            angle_tolerance=self.angle_tolerance,
-            normalize_angle_func=self.normalize_angle,
-            angle_difference_func=self.angle_difference,
-            point_to_line_distance_func=self.point_to_line_distance,
-        )
-
-        # Initialize state validator for centralized state validation
-        self.state_validator = create_state_validator_from_config(
-            {
-                "position_tolerance": self.position_tolerance,
-                "angle_tolerance": self.angle_tolerance,
-                "velocity_tolerance": self.velocity_tolerance,
-                "angular_velocity_tolerance": self.angular_velocity_tolerance,
-            }
-        )
-
-        # Initialize data logger with FastLogger
-        # Initialize data logger
-
-        self.data_logger = create_data_logger(
-            mode="simulation",
-            filename="control_data.csv",
-        )
-        self.physics_logger = create_data_logger(
-            mode="physics",
-            filename="physics_data.csv",
-        )
-
-        self.report_generator = create_mission_report_generator(SatelliteConfig)
-        self.data_save_path = None
-
-        # Initialize IO helper for data export operations
-        self._io = SimulationIO(self)
-
-
-        # Initialize Simulation Context for logging
-        from src.satellite_control.core.simulation_context import SimulationContext
-
-        self.context = SimulationContext()
-        self.context.dt = self.satellite.dt
-        self.context.control_dt = self.control_update_interval
-
-        logger.info("Linearized MPC Simulation initialized:")
-        logger.info("INFO: Formulation: A*x[k] + B*u[k] (Linearized Dynamics)")
-        def _format_euler_deg(euler: Tuple[float, float, float]) -> str:
-            roll, pitch, yaw = np.degrees(euler)
-            return f"roll={roll:.1f}°, pitch={pitch:.1f}°, yaw={yaw:.1f}°"
-
-        s_ang_str = _format_euler_deg(start_angle)
-        t_ang_str = _format_euler_deg(target_angle)
-
-        logger.info(f"INFO: Start: {start_pos} m, {s_ang_str}")
-        logger.info(f"INFO: Target: {target_pos} m, {t_ang_str}")
-        logger.info(f"INFO: Control update rate: " f"{1 / self.control_update_interval:.1f} Hz")
-        logger.info(f"INFO: Prediction horizon: {app_config.mpc.prediction_horizon}")
-        logger.info(f"INFO: Control horizon: {app_config.mpc.control_horizon}")
-
-        if SatelliteConfig.USE_REALISTIC_PHYSICS:
-            logger.info("WARNING: REALISTIC PHYSICS ENABLED:")
-            logger.info(f"WARNING: - Valve delay: " f"{self.VALVE_DELAY * 1000:.0f} ms")
-            logger.info(f"WARNING: - Ramp-up time: " f"{self.THRUST_RAMPUP_TIME * 1000:.0f} ms")
-            logger.info(
-                f"WARNING: - Linear damping: " f"{SatelliteConfig.LINEAR_DAMPING_COEFF:.3f} N/(m/s)"
-            )
-            logger.info(
-                f"WARNING: - Rotational damping: "
-                f"{SatelliteConfig.ROTATIONAL_DAMPING_COEFF:.4f} N*m/(rad/s)"
-            )
-            logger.info(
-                f"WARNING: - Position noise: "
-                f"{SatelliteConfig.POSITION_NOISE_STD * 1000:.2f} mm std"
-            )
-            angle_noise_deg = np.degrees(SatelliteConfig.ANGLE_NOISE_STD)
-            logger.info(f"WARNING: - Angle noise: {angle_noise_deg:.2f}° std")
-        else:
-            logger.info("INFO: Idealized physics (no delays, noise, or damping)")
-
-        # Apply obstacle avoidance based on mode
-        if SatelliteConfig.OBSTACLES_ENABLED and SatelliteConfig.get_obstacles():
-            logger.info("Obstacle avoidance enabled.")
-
-        # Initialize visualization manager
-        self.visualizer = create_simulation_visualizer(self)
 
     def get_current_state(self) -> np.ndarray:
         """Get current satellite state [pos(3), quat(4), vel(3), ang_vel(3)]."""
@@ -723,8 +564,18 @@ class SatelliteMPCLinearizedSimulation:
                 mpc_info,
             )
 
+            # Record performance metrics
+            solve_time = mpc_info.get("solve_time", mpc_computation_time) if mpc_info else mpc_computation_time
+            timeout = mpc_info.get("timeout", False) if mpc_info else False
+            self.performance_monitor.record_mpc_solve(solve_time, timeout=timeout)
+            
+            # Record control loop time (from MPC start to command sent)
+            control_loop_time = command_sent_time - mpc_start_time
+            timing_violation = mpc_computation_time > (self.control_update_interval - 0.02)
+            self.performance_monitor.record_control_loop(control_loop_time, timing_violation=timing_violation)
+
             # Verify timing constraint
-            if mpc_computation_time > (self.control_update_interval - 0.02):
+            if timing_violation:
                 logger.warning(
                     f"WARNING: MPC computation time "
                     f"({mpc_computation_time:.3f}s) exceeds real-time!"
@@ -830,200 +681,6 @@ class SatelliteMPCLinearizedSimulation:
         current_state = self.get_current_state()
         return self.state_validator.check_target_reached(current_state, self.target_state)
 
-    def update_simulation(self, frame: int) -> List[Any]:
-        """
-        Update simulation step (called by matplotlib animation).
-
-        Args:
-            frame: Current frame number
-
-        Returns:
-            List of artists for matplotlib animation
-        """
-        if not self.is_running:
-            return []
-
-        # Update target state based on mission mode (unified with Real.py)
-        current_state = self.get_current_state()
-        self.update_target_state_for_mode(current_state)
-
-        self.update_mpc_control()
-
-        # Process command queue to apply delayed commands (sets
-        # active_thrusters)
-        self.process_command_queue()
-
-        # Advance MuJoCo physics: keep time bases aligned for valve timing
-        dt = self.satellite.dt
-        self.satellite.simulation_time = self.simulation_time
-        self.satellite.update_physics(dt)
-        self.simulation_time = self.satellite.simulation_time
-
-        # Log High-Frequency Physics Data
-        self.log_physics_step()
-
-        if not (
-            hasattr(SatelliteConfig, "DXF_SHAPE_MODE_ACTIVE")
-            and SatelliteConfig.DXF_SHAPE_MODE_ACTIVE
-        ):
-            target_currently_reached = self.check_target_reached()
-
-            if target_currently_reached:
-                if self.target_reached_time is None:
-                    # First time reaching target
-                    self.target_reached_time = self.simulation_time
-                    print(
-                        f"\nTARGET REACHED! Time: {self.simulation_time:.1f}s"
-                        " - MPC will maintain position"
-                    )
-                else:
-                    # Update maintenance tracking
-                    self.target_maintenance_time = self.simulation_time - self.target_reached_time
-                    current_state = self.get_current_state()
-                    pos_error = np.linalg.norm(current_state[:3] - self.target_state[:3])
-                    ang_error = quat_angle_error(
-                        self.target_state[3:7], current_state[3:7]
-                    )
-                    self.maintenance_position_errors.append(float(pos_error))
-                    self.maintenance_angle_errors.append(float(ang_error))
-
-                if (
-                    hasattr(SatelliteConfig, "ENABLE_WAYPOINT_MODE")
-                    and SatelliteConfig.ENABLE_WAYPOINT_MODE
-                ):
-                    stabilization_time = self.target_maintenance_time
-
-                    is_final_target = (
-                        SatelliteConfig.CURRENT_TARGET_INDEX
-                        >= len(SatelliteConfig.WAYPOINT_TARGETS) - 1
-                    )
-                    if is_final_target:
-                        required_hold_time = SatelliteConfig.WAYPOINT_FINAL_STABILIZATION_TIME
-                    else:
-                        required_hold_time = getattr(SatelliteConfig, "TARGET_HOLD_TIME", 3.0)
-
-                    if stabilization_time >= required_hold_time:
-                        # Advance to next target
-                        next_available = SatelliteConfig.advance_to_next_target()
-                        if next_available:
-                            # Update target state to next target with obstacle
-                            # avoidance
-                            (
-                                target_pos,
-                                target_angle,
-                            ) = SatelliteConfig.get_current_waypoint_target()
-                            if target_pos is not None:
-                                roll_deg, pitch_deg, yaw_deg = np.degrees(target_angle)
-                                logger.info(
-                                    f"MOVING TO NEXT TARGET: "
-                                    f"({target_pos[0]:.2f}, "
-                                    f"{target_pos[1]:.2f}) m, "
-                                    f"roll={roll_deg:.1f}°, pitch={pitch_deg:.1f}°, yaw={yaw_deg:.1f}°"
-                                )
-                                self.target_state = np.zeros(13, dtype=float)
-                                self.target_state[0:3] = target_pos
-                                self.target_state[3:7] = euler_xyz_to_quat_wxyz(target_angle)
-                                self.target_reached_time = None
-                                self.approach_phase_start_time = self.simulation_time
-                                self.target_maintenance_time = 0.0
-                        else:
-                            # All targets completed - end simulation
-                            logger.info("WAYPOINT MISSION COMPLETED! " "All targets visited.")
-                            use_stab = SatelliteConfig.USE_FINAL_STABILIZATION_IN_SIMULATION
-                            if not use_stab:
-                                self.is_running = False
-                                self.print_performance_summary()
-                                return []
-                            SatelliteConfig.MULTI_POINT_PHASE = "COMPLETE"
-            else:
-                if self.target_reached_time is not None:
-                    self.times_lost_target += 1
-                    t = self.simulation_time
-                    print(f"WARNING: Target lost at t={t:.1f}s" " - MPC working to regain control")
-
-        if (
-            not SatelliteConfig.USE_FINAL_STABILIZATION_IN_SIMULATION
-            and self.target_reached_time is not None
-            and not (
-                hasattr(SatelliteConfig, "ENABLE_WAYPOINT_MODE")
-                and SatelliteConfig.ENABLE_WAYPOINT_MODE
-            )
-            and not (
-                hasattr(SatelliteConfig, "DXF_SHAPE_MODE_ACTIVE")
-                and SatelliteConfig.DXF_SHAPE_MODE_ACTIVE
-            )
-        ):
-            # Mission 1: Waypoint Navigation (single waypoint) with immediate
-            # termination after target reached
-            current_maintenance_time = self.simulation_time - self.target_reached_time
-            if current_maintenance_time >= SatelliteConfig.WAYPOINT_FINAL_STABILIZATION_TIME:
-                stab_time = SatelliteConfig.WAYPOINT_FINAL_STABILIZATION_TIME
-                print(
-                    f"\n WAYPOINT MISSION COMPLETE! "
-                    f"Stable at target for {stab_time:.1f} seconds."
-                )
-                self.is_running = False
-                self.print_performance_summary()
-                return []
-
-        if (
-            SatelliteConfig.USE_FINAL_STABILIZATION_IN_SIMULATION
-            and self.target_reached_time is not None
-        ):
-            current_maintenance_time = self.simulation_time - self.target_reached_time
-
-            # Waypoint navigation: check completion for single or multiple
-            # waypoints
-            if not (
-                hasattr(SatelliteConfig, "DXF_SHAPE_MODE_ACTIVE")
-                and SatelliteConfig.DXF_SHAPE_MODE_ACTIVE
-            ):
-                # Single waypoint (no ENABLE_WAYPOINT_MODE set)
-                if not (
-                    hasattr(SatelliteConfig, "ENABLE_WAYPOINT_MODE")
-                    and SatelliteConfig.ENABLE_WAYPOINT_MODE
-                ):
-                    if (
-                        current_maintenance_time
-                        >= SatelliteConfig.WAYPOINT_FINAL_STABILIZATION_TIME
-                    ):
-                        final_stab = SatelliteConfig.WAYPOINT_FINAL_STABILIZATION_TIME
-                        stab_t = final_stab
-                        print(
-                            f"\n WAYPOINT MISSION COMPLETE! "
-                            f"Stable at target for {stab_t:.1f} seconds."
-                        )
-                        self.is_running = False
-                        self.print_performance_summary()
-                        return []
-                # Multiple waypoints (ENABLE_WAYPOINT_MODE = True)
-                elif getattr(SatelliteConfig, "MULTI_POINT_PHASE", None) == "COMPLETE":
-                    if (
-                        current_maintenance_time
-                        >= SatelliteConfig.WAYPOINT_FINAL_STABILIZATION_TIME
-                    ):
-                        final_stab = SatelliteConfig.WAYPOINT_FINAL_STABILIZATION_TIME
-                        stab_t = final_stab
-                        print(
-                            f"\n WAYPOINT MISSION COMPLETE! "
-                            f"All targets stable for {stab_t:.1f} seconds."
-                        )
-                        self.is_running = False
-                        self.print_performance_summary()
-                        return []
-
-        # Only stop simulation when max time is reached
-        if self.simulation_time >= self.max_simulation_time:
-            print(f"\nSIMULATION COMPLETE at {self.simulation_time:.1f}s")
-            self.is_running = False
-            self.print_performance_summary()
-
-        # Redraw
-        self.draw_simulation()
-        self.update_mpc_info_panel()  # Use custom MPC info panel instead
-
-        return []
-
     def draw_simulation(self) -> None:
         """Draw the simulation with satellite, target, and trajectory."""
         self.visualizer.sync_from_controller()
@@ -1047,9 +704,30 @@ class SatelliteMPCLinearizedSimulation:
         self.visualizer.update_mpc_info_panel()
 
     def print_performance_summary(self) -> None:
-        """Print performance summary at the end of simulation (delegated)."""
-        self.visualizer.sync_from_controller()
-        self.visualizer.print_performance_summary()
+        """Print performance summary at the end of simulation."""
+        # Export performance metrics
+        if self.data_save_path:
+            metrics_path = self.data_save_path / "performance_metrics.json"
+            try:
+                self.performance_monitor.export_metrics(metrics_path)
+                logger.info(f"Performance metrics exported to {metrics_path}")
+            except Exception as e:
+                logger.warning(f"Failed to export performance metrics: {e}")
+        
+        # Print performance summary
+        self.performance_monitor.print_summary()
+        
+        # Check thresholds and warn
+        warnings = self.performance_monitor.check_thresholds()
+        if warnings:
+            logger.warning("Performance threshold violations detected:")
+            for warning in warnings:
+                logger.warning(f"  ⚠️  {warning}")
+        
+        # Delegate to visualizer if available
+        if self.visualizer:
+            self.visualizer.sync_from_controller()
+            self.visualizer.print_performance_summary()
 
     def reset_simulation(self) -> None:
         """Reset simulation to initial state (delegated)."""
@@ -1061,159 +739,6 @@ class SatelliteMPCLinearizedSimulation:
         self.visualizer.sync_from_controller()
         self.visualizer.auto_generate_visualizations()
 
-    def _run_simulation_with_globals(self, show_animation: bool = True) -> None:
-        """
-        Run linearized MPC simulation.
-
-        Args:
-            show_animation: Whether to display animation during simulation
-        """
-        print("\nStarting Linearized MPC Simulation...")
-        print("Press 'q' to quit early, Space to pause/resume")
-        self.is_running = True
-
-        # Clear any previous data from the logger
-        self.data_logger.clear_logs()
-        self.physics_logger.clear_logs()
-
-        self.data_save_path = self.create_data_directories()
-        if self.data_save_path:
-            self.data_logger.set_save_path(self.data_save_path)
-            self.physics_logger.set_save_path(self.data_save_path)
-            logger.info("Created data directory: %s", self.data_save_path)
-
-        # Simulation Context
-        from src.satellite_control.core.simulation_context import (
-            SimulationContext,
-        )
-
-        if not hasattr(self, "context"):
-            self.context = SimulationContext()
-            self.context.dt = self.satellite.dt
-            self.context.control_dt = self.control_update_interval
-
-        # Initialize MPC Controller (Linearized Model)
-        try:
-            # When using MuJoCo viewer, skip matplotlib animation (MuJoCo
-            # viewer updates itself)
-            if show_animation and not self.use_mujoco_viewer:
-                # Matplotlib animation mode (legacy)
-                fig = self.satellite.fig
-                ani = FuncAnimation(
-                    fig,
-                    self.update_simulation,
-                    interval=int(self.satellite.dt * 1000),
-                    blit=False,
-                    repeat=False,
-                    cache_frame_data=False,
-                )
-                plt.show()  # Show the animation window live
-
-                # After animation is complete, save files
-                if self.data_save_path is not None:
-                    print("\nSaving simulation data...")
-                    self.save_csv_data()
-                    self.visualizer.sync_from_controller()
-                    self.save_mission_summary()
-                    self.save_animation_mp4(fig, ani)
-                    print(f" Data saved to: {self.data_save_path}")
-
-                    print("\n Auto-generating performance plots...")
-                    self.auto_generate_visualizations()
-                    if hasattr(self.visualizer, "save_mujoco_video"):
-                        self.visualizer.save_mujoco_video(self.data_save_path)
-                    print(" All visualizations complete!")
-            else:
-                # Run with MuJoCo viewer or without animation
-
-                # Performance Optimization: Batch physics steps
-                # Calculate how many physics steps fit in one control update
-                steps_per_batch = int(self.control_update_interval / self.satellite.dt)
-                if steps_per_batch < 1:
-                    steps_per_batch = 1
-
-                batch_mode = steps_per_batch > 1
-                logger.info(
-                    f"Running optimized simulation loop. "
-                    f"Batch: {steps_per_batch} (dt={self.satellite.dt:.4f}s)"
-                )
-
-                fast_batch_steps = steps_per_batch - 1
-
-                while self.is_running:
-                    step_only = False
-                    if (
-                        self.use_mujoco_viewer
-                        and hasattr(self.satellite, "is_viewer_paused")
-                        and self.satellite.is_viewer_paused()
-                    ):
-                        if hasattr(self.satellite, "consume_viewer_step") and self.satellite.consume_viewer_step():
-                            step_only = True
-                        else:
-                            if hasattr(self.satellite, "sync_viewer"):
-                                self.satellite.sync_viewer()
-                            time.sleep(0.01)
-                            continue
-
-                    # Optimized Batch: Run physics steps without control logic
-                    # overhead
-                    if batch_mode and not step_only:
-                        for _ in range(fast_batch_steps):
-                            # Inline logic for speed
-                            self.process_command_queue()
-                            self.satellite.update_physics(self.satellite.dt)
-                            self.simulation_time = self.satellite.simulation_time
-                            self.log_physics_step()
-
-                    # Full Update (run MPC check, Mission Check, Logging, 1
-                    # Physics Step)
-                    self.update_simulation(None)  # type: ignore[arg-type]
-
-                    if not self.is_running:
-                        break
-
-                if self.data_save_path is not None:
-                    print("\nSaving simulation data...")
-                    self.save_csv_data()
-                    self.visualizer.sync_from_controller()
-                    self.save_mission_summary()
-                    print(f" CSV data saved to: {self.data_save_path}")
-
-                    # Auto-generate all visualizations
-                    print("\n Auto-generating visualizations...")
-                    self.auto_generate_visualizations()
-                    # Also generate MuJoCo 3D render if possible
-                    if hasattr(self.visualizer, "save_mujoco_video"):
-                        self.visualizer.save_mujoco_video(self.data_save_path)
-                    print(" All visualizations complete!")
-
-        except KeyboardInterrupt:
-            print("\n\nSimulation cancelled by user")
-            self.is_running = False
-
-            # Save data when interrupted
-            if self.data_save_path is not None and self.data_logger.get_log_count() > 0:
-                print("\nSaving simulation data...")
-                self.save_csv_data()
-                self.visualizer.sync_from_controller()
-                self.save_mission_summary()
-                print(f" Data saved to: {self.data_save_path}")
-
-                # Try to generate visualizations if we have enough data
-                if self.data_logger.get_log_count() > 10:
-                    try:
-                        print("\n Auto-generating visualizations...")
-                        self.auto_generate_visualizations()
-                        if hasattr(self.visualizer, "save_mujoco_video"):
-                            self.visualizer.save_mujoco_video(self.data_save_path)
-                        print(" All visualizations complete!")
-                    except Exception as e:
-                        logger.warning(f"WARNING: Could not generate visualizations: {e}")
-
-        finally:
-            # Cleanup
-            pass
-        return self.data_save_path  # type: ignore[return-value]
 
     def run_simulation(self, show_animation: bool = True) -> None:
         """
@@ -1222,8 +747,10 @@ class SatelliteMPCLinearizedSimulation:
         Args:
             show_animation: Whether to display animation during simulation
         """
+        # Use SimulationLoop to handle all loop logic
+        loop = SimulationLoop(self)
         with use_structured_config(self.structured_config.clone()):
-            return self._run_simulation_with_globals(show_animation=show_animation)
+            return loop.run(show_animation=show_animation, structured_config=self.structured_config)
 
     def close(self) -> None:
         """

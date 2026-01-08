@@ -192,10 +192,11 @@ def calculate_safe_path_to_waypoint(
             )
 
             # Create waypoint that goes around the obstacle
-            from src.satellite_control.config import SatelliteConfig
-
+            # Use constant from obstacles module (not mutable, so safe to use directly)
+            from src.satellite_control.config.obstacles import OBSTACLE_AVOIDANCE_SAFETY_MARGIN
+            
             intermediate_2d = closest_obstacle + perpendicular * (
-                safety_radius + SatelliteConfig.OBSTACLE_AVOIDANCE_SAFETY_MARGIN
+                safety_radius + OBSTACLE_AVOIDANCE_SAFETY_MARGIN
             )
 
         # Construct 3D intermediate waypoint
