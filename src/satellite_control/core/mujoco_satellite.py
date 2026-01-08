@@ -24,7 +24,7 @@ from src.satellite_control.utils.orientation_utils import euler_xyz_to_quat_wxyz
 import numpy as np
 from mujoco import viewer as mujoco_viewer
 
-from src.satellite_control.config import SatelliteConfig
+# V4.0.0: SatelliteConfig removed - use AppConfig only
 from src.satellite_control.config.models import AppConfig, SatellitePhysicalParams, SimulationParams
 
 from .backend import SimulationBackend
@@ -42,21 +42,22 @@ class MuJoCoSatelliteSimulator(SimulationBackend):
         self,
         model_path: str = "models/satellite_3d.xml",
         use_mujoco_viewer: bool = True,
-        simulation_params: Optional[SimulationParams] = None,
-        physics_params: Optional[SatellitePhysicalParams] = None,
         app_config: Optional[AppConfig] = None,
     ):
-        """Initialize MuJoCo simulation.
+        """Initialize MuJoCo simulation (V4.0.0: app_config required).
 
         Args:
             model_path: Path to MuJoCo XML model file
             use_mujoco_viewer: If True, use MuJoCo's native viewer for
                 visualization. If False, use matplotlib
                 (for headless/testing)
-            simulation_params: Optional SimulationParams for timing (V3.0.0)
-            physics_params: Optional SatellitePhysicalParams for physics (V3.0.0)
-            app_config: Optional AppConfig (preferred, contains both params) (V3.0.0)
+            app_config: AppConfig (required in V4.0.0, no fallback)
         """
+        # V4.0.0: app_config is required
+        if app_config is None:
+            from src.satellite_control.config.simulation_config import SimulationConfig
+            app_config = SimulationConfig.create_default().app_config
+        
         # Load MuJoCo model
         model_full_path = Path(model_path)
         if not model_full_path.exists():
@@ -71,69 +72,14 @@ class MuJoCoSatelliteSimulator(SimulationBackend):
         self.viewer_paused = False
         self.viewer_step_request = False
 
-        # V3.0.0: Use AppConfig if provided, otherwise fall back to SatelliteConfig
-        if app_config is not None:
-            self._app_config = app_config
-            physics = app_config.physics
-            simulation = app_config.simulation
-        else:
-            # Backward compatibility: create from params or use SatelliteConfig
-            if physics_params is not None:
-                physics = physics_params
-            else:
-                # Fallback to SatelliteConfig
-                from src.satellite_control.config import SatelliteConfig
-                physics = SatellitePhysicalParams(
-                    total_mass=SatelliteConfig.TOTAL_MASS,
-                    moment_of_inertia=SatelliteConfig.MOMENT_OF_INERTIA,
-                    satellite_size=SatelliteConfig.SATELLITE_SIZE,
-                    com_offset=tuple(SatelliteConfig.COM_OFFSET),
-                    thruster_positions=SatelliteConfig.THRUSTER_POSITIONS,
-                    thruster_directions={k: tuple(v) for k, v in SatelliteConfig.THRUSTER_DIRECTIONS.items()},
-                    thruster_forces=SatelliteConfig.THRUSTER_FORCES,
-                    use_realistic_physics=SatelliteConfig.USE_REALISTIC_PHYSICS,
-                    damping_linear=SatelliteConfig.DAMPING_LINEAR,
-                    damping_angular=SatelliteConfig.DAMPING_ANGULAR,
-                )
-            
-            if simulation_params is not None:
-                simulation = simulation_params
-            else:
-                # Fallback to SatelliteConfig
-                from src.satellite_control.config import SatelliteConfig
-                simulation = SimulationParams(
-                    dt=SatelliteConfig.SIMULATION_DT,
-                    max_duration=SatelliteConfig.MAX_SIMULATION_TIME,
-                    headless=False,  # Default
-                    window_width=800,
-                    window_height=600,
-                    use_final_stabilization=SatelliteConfig.USE_FINAL_STABILIZATION_IN_SIMULATION,
-                    control_dt=SatelliteConfig.CONTROL_DT,
-                    target_hold_time=SatelliteConfig.TARGET_HOLD_TIME,
-                    waypoint_final_stabilization_time=SatelliteConfig.WAYPOINT_FINAL_STABILIZATION_TIME,
-                    shape_final_stabilization_time=SatelliteConfig.SHAPE_FINAL_STABILIZATION_TIME,
-                    shape_positioning_stabilization_time=SatelliteConfig.SHAPE_POSITIONING_STABILIZATION_TIME,
-                    default_target_speed=0.1,  # Default
-                )
-            
-            # Create AppConfig for internal use
-            # V3.0.0: Use SimulationConfig.create_default() to get proper defaults
-            from src.satellite_control.config.models import AppConfig
-            from src.satellite_control.config.simulation_config import SimulationConfig
-            
-            default_config = SimulationConfig.create_default()
-            self._app_config = AppConfig(
-                version="3.0.0",
-                physics=physics,
-                mpc=default_config.app_config.mpc,  # Use defaults from SimulationConfig
-                simulation=simulation,
-            )
+        # V4.0.0: app_config is required (no fallback)
+        self._app_config = app_config
 
         # Store physics and simulation params for easy access
         self._physics_params = self._app_config.physics
         self._simulation_params = self._app_config.simulation
 
-        # Configuration from AppConfig (V3.0.0) or SatelliteConfig (backward compat)
+        # Configuration from AppConfig (V4.0.0: required, no fallback)
         self.satellite_size = self._physics_params.satellite_size
         self.total_mass = self._physics_params.total_mass
         self.moment_of_inertia = self._physics_params.moment_of_inertia
@@ -574,8 +520,7 @@ class MuJoCoSatelliteSimulator(SimulationBackend):
         # No, update_physics calls this? No, update_physics computes it internally.
         # simulation.py calls this for visualization.
 
-        # Re-implementing logic:
-        # Note: SatelliteConfig is already imported at module level
+        # Re-implementing logic (V4.0.0: uses self.thrusters and self.thruster_directions from app_config)
 
         for thruster_id in range(1, 13):
             force_magnitude = self.get_thrust_force(thruster_id)
@@ -630,9 +575,9 @@ class MuJoCoSatelliteSimulator(SimulationBackend):
             time_since_deactivation = self.simulation_time - deactivation_time
 
             # Phase 1: Valve closing delay - maintains full thrust
-            # V3.0.0: Use physics params (for now, use 0.0 as default - not in AppConfig yet)
-            valve_delay = getattr(SatelliteConfig, "THRUSTER_VALVE_DELAY", 0.0)
-            rampup_time = getattr(SatelliteConfig, "THRUSTER_RAMPUP_TIME", 0.0)
+            # V4.0.0: Use hardcoded defaults (TODO: move to AppConfig.physics in future)
+            valve_delay = 0.05  # 50ms valve delay
+            rampup_time = 0.015  # 15ms ramp-up time
             if time_since_deactivation < valve_delay:
                 force = nominal_force  # Assumes valve was fully open
             # Phase 2: Ramp-down
@@ -650,8 +595,8 @@ class MuJoCoSatelliteSimulator(SimulationBackend):
             # as going from MAX to 0.
 
             # Add noise
-            # V3.0.0: Use physics params (for now, use 0.0 as default - not in AppConfig yet)
-            noise_std = getattr(SatelliteConfig, "THRUSTER_FORCE_NOISE_STD", 0.0)
+            # V4.0.0: Use hardcoded default (TODO: move to AppConfig.physics in future)
+            noise_std = 0.0  # No noise by default
             noise_factor = 1.0 + np.random.normal(0, noise_std)
             return force * noise_factor
 
@@ -664,9 +609,9 @@ class MuJoCoSatelliteSimulator(SimulationBackend):
         time_since_activation = self.simulation_time - activation_time
 
         # Phase 1: Valve opening delay - no thrust
-        # V3.0.0: Use physics params (for now, use 0.0 as default - not in AppConfig yet)
-        valve_delay = getattr(SatelliteConfig, "THRUSTER_VALVE_DELAY", 0.0)
-        rampup_time = getattr(SatelliteConfig, "THRUSTER_RAMPUP_TIME", 0.0)
+        # V4.0.0: Use hardcoded defaults (TODO: move to AppConfig.physics in future)
+        valve_delay = 0.05  # 50ms valve delay
+        rampup_time = 0.015  # 15ms ramp-up time
         if time_since_activation < valve_delay:
             return 0.0
 
@@ -680,8 +625,8 @@ class MuJoCoSatelliteSimulator(SimulationBackend):
             force = nominal_force
 
         # Add noise
-        # V3.0.0: Use physics params (for now, use 0.0 as default - not in AppConfig yet)
-        noise_std = getattr(SatelliteConfig, "THRUSTER_FORCE_NOISE_STD", 0.0)
+        # V4.0.0: Use hardcoded default (TODO: move to AppConfig.physics in future)
+        noise_std = 0.0  # No noise by default
         noise_factor = 1.0 + np.random.normal(0, noise_std)
         return force * noise_factor
 
@@ -737,11 +682,11 @@ class MuJoCoSatelliteSimulator(SimulationBackend):
             self.data.xfrc_applied[body_id, 5] += drag_torque
 
             # Random disturbances
-            # V3.0.0: Use physics params (for now, use SatelliteConfig - not in AppConfig yet)
-            enable_disturbances = getattr(SatelliteConfig, "ENABLE_RANDOM_DISTURBANCES", False)
+            # V4.0.0: Use hardcoded defaults (TODO: move to AppConfig.physics in future)
+            enable_disturbances = False  # Disabled by default
             if enable_disturbances:
-                disturbance_force_std = getattr(SatelliteConfig, "DISTURBANCE_FORCE_STD", 0.0)
-                disturbance_torque_std = getattr(SatelliteConfig, "DISTURBANCE_TORQUE_STD", 0.0)
+                disturbance_force_std = 0.0  # No force disturbance by default
+                disturbance_torque_std = 0.0  # No torque disturbance by default
                 disturbance_force = np.random.normal(0, disturbance_force_std, 2)
                 self.data.xfrc_applied[body_id, 0] += disturbance_force[0]
                 self.data.xfrc_applied[body_id, 1] += disturbance_force[1]

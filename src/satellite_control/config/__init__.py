@@ -13,14 +13,16 @@ Configuration modules:
 - constants: UI, network, and data management constants
 - obstacles: Obstacle avoidance configuration
 
-Usage:
-    from config import PhysicsConfig, MPCConfig, SatelliteConfig
+Usage (V4.0.0+):
+    from config import SimulationConfig
+    
+    # Create and use immutable configuration
+    config = SimulationConfig.create_default()
+    mass = config.app_config.physics.total_mass
 
-    # Access structured config
-    mass = PhysicsConfig.TOTAL_MASS
-
-    # Or use unified wrapper
-    mass = SatelliteConfig.TOTAL_MASS
+Legacy (deprecated):
+    from config import SatelliteConfig  # DEPRECATED in V4.0.0
+    # Use SimulationConfig instead
 """
 
 from .constants import Constants
@@ -34,8 +36,11 @@ from .presets import (
     list_presets,
     load_preset,
 )
+# V4.0.0: SatelliteConfig is deprecated - use SimulationConfig instead
+# Kept for internal compatibility (SatelliteConfigAdapter) only
 from .satellite_config import (
-    SatelliteConfig,
+    SatelliteConfig,  # DEPRECATED: Use SimulationConfig instead
+    SatelliteConfigAdapter,  # Internal compatibility adapter
     StructuredConfig,
     build_structured_config,
     use_structured_config,
@@ -54,7 +59,8 @@ __all__ = [
     "get_physics_params",
     "get_timing_params",
     "get_mpc_params",
-    "SatelliteConfig",
+    "SatelliteConfig",  # DEPRECATED in V4.0.0: Use SimulationConfig instead
+    "SatelliteConfigAdapter",  # Internal compatibility adapter (not for public use)
     "build_structured_config",  # For testing
     "StructuredConfig",  # Structured configuration
     "use_structured_config",  # Configuration context manager
@@ -64,5 +70,5 @@ __all__ = [
     "get_preset_description",  # Get preset description
     "list_presets",  # List all presets
     "load_preset",  # Load preset configuration
-    "SimulationConfig",  # Immutable simulation configuration container
+    "SimulationConfig",  # Immutable simulation configuration container (V4.0.0+)
 ]

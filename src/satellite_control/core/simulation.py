@@ -39,15 +39,15 @@ from typing import Any, Dict, List, Optional, Tuple
 import matplotlib.pyplot as plt
 import numpy as np
 
+# V4.0.0: SatelliteConfig removed - use SimulationConfig only
 from src.satellite_control.config import (
-    SatelliteConfig,
     SimulationConfig,
     StructuredConfig,
     build_structured_config,
     use_structured_config,
 )
 
-from src.satellite_control.config import SatelliteConfig
+# V4.0.0: SatelliteConfig removed - use SimulationConfig only
 from src.satellite_control.config.constants import Constants
 from src.satellite_control.config.satellite_config import (
     initialize_config,
@@ -173,9 +173,10 @@ class SatelliteMPCLinearizedSimulation:
             self.structured_config = (
                 config.clone() if config else build_structured_config(config_overrides)
             )
-            # Create SimulationConfig from structured_config for internal use
-            # This allows gradual migration away from SatelliteConfig.
-            app_config = SatelliteConfig.get_app_config()
+            # V4.0.0: Create SimulationConfig from structured_config for internal use
+            # No SatelliteConfig fallback - use defaults if needed
+            from src.satellite_control.config.simulation_config import SimulationConfig
+            app_config = SimulationConfig.create_default().app_config
             # For v2.0.0, prefer a fresh MissionState; legacy CLIs now
             # populate mission_state directly via SimulationConfig.
             from src.satellite_control.config.mission_state import create_mission_state
@@ -311,10 +312,13 @@ class SatelliteMPCLinearizedSimulation:
         # ---------------------------------------------------------------------
 
         # Determine mission phase
-        if getattr(SatelliteConfig, "DXF_SHAPE_MODE_ACTIVE", False) and getattr(
-            SatelliteConfig, "DXF_SHAPE_PHASE", ""
+        # V4.0.0: Get mission phase from mission_manager if available
+        if (
+            self.mission_manager
+            and self.mission_manager.mission_state
+            and self.mission_manager.mission_state.dxf_shape_mode_active
         ):
-            mission_phase = SatelliteConfig.DXF_SHAPE_PHASE
+            mission_phase = self.mission_manager.mission_state.dxf_shape_phase or "STABILIZING"
         else:
             mission_phase = "STABILIZING" if self.target_reached_time is not None else "APPROACHING"
 
@@ -437,8 +441,12 @@ class SatelliteMPCLinearizedSimulation:
         Args:
             current_state: Current state vector [x, y, z, qw, qx, qy, qz, vx, vy, vz, wx, wy, wz]
         """
-        # Track target index to detect waypoint advances
-        prev_target_index = getattr(SatelliteConfig, "CURRENT_TARGET_INDEX", 0)
+        # Track target index to detect waypoint advances (V4.0.0: use mission_manager)
+        prev_target_index = (
+            self.mission_manager.mission_state.current_target_index
+            if self.mission_manager and self.mission_manager.mission_state
+            else 0
+        )
 
         # Delegate to MissionStateManager for centralized mission logic
         target_state = self.mission_manager.update_target_state(
@@ -448,11 +456,19 @@ class SatelliteMPCLinearizedSimulation:
             current_state=current_state,
         )
 
-        # Detect if MissionStateManager advanced to a new waypoint
-        new_target_index = getattr(SatelliteConfig, "CURRENT_TARGET_INDEX", 0)
+        # Detect if MissionStateManager advanced to a new waypoint (V4.0.0: use mission_manager)
+        new_target_index = (
+            self.mission_manager.mission_state.current_target_index
+            if self.mission_manager and self.mission_manager.mission_state
+            else 0
+        )
         if new_target_index != prev_target_index:
-            # Check if mission is complete to avoid false reset
-            is_mission_complete = getattr(SatelliteConfig, "MULTI_POINT_PHASE", "") == "COMPLETE"
+            # Check if mission is complete to avoid false reset (V4.0.0: use mission_manager)
+            is_mission_complete = (
+                self.mission_manager.mission_state.multi_point_phase == "COMPLETE"
+                if self.mission_manager and self.mission_manager.mission_state
+                else False
+            )
 
             # Only reset if NOT complete (advancing to valid next target)
             if not is_mission_complete:
@@ -471,10 +487,13 @@ class SatelliteMPCLinearizedSimulation:
                 return
         else:
             # Check for significant target change in Waypoint Mode (Robustness fallback)
-            # Triggers if index tracking failed to catch the transition
-            if self.target_state is not None and getattr(
-                SatelliteConfig, "ENABLE_WAYPOINT_MODE", False
-            ):
+            # Triggers if index tracking failed to catch the transition (V4.0.0: use mission_manager)
+            enable_waypoint = (
+                self.mission_manager.mission_state.enable_waypoint_mode
+                if self.mission_manager and self.mission_manager.mission_state
+                else False
+            )
+            if self.target_state is not None and enable_waypoint:
                 # 3D Position Change
                 pos_change = np.linalg.norm(target_state[:3] - self.target_state[:3])
 
@@ -595,8 +614,12 @@ class SatelliteMPCLinearizedSimulation:
                 stabilization_time = self.simulation_time - self.target_reached_time
                 status_msg = f"Stabilizing on Target (t = {stabilization_time:.1f}s)"
 
-            elif getattr(SatelliteConfig, "DXF_SHAPE_MODE_ACTIVE", False):
-                phase = getattr(SatelliteConfig, "DXF_SHAPE_PHASE", "UNKNOWN")
+            elif (
+                self.mission_manager
+                and self.mission_manager.mission_state
+                and self.mission_manager.mission_state.dxf_shape_mode_active
+            ):
+                phase = self.mission_manager.mission_state.dxf_shape_phase or "UNKNOWN"
                 # Map internal phase names to user-friendly display names
                 phase_display_names = {
                     "POSITIONING": "Traveling to Path",

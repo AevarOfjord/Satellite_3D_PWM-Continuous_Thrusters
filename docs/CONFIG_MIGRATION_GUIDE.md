@@ -20,8 +20,10 @@ The new pattern provides:
 
 ## Migration Timeline
 
-- **v1.0.0**: Deprecation warnings added (current)
-- **v2.0.0**: Deprecated attributes will be removed
+- **v1.0.0**: Deprecation warnings added
+- **v2.0.0**: Migration in progress
+- **v3.0.0**: Migration continued
+- **v4.0.0**: ✅ **COMPLETE** - `SatelliteConfig` removed from production code
 
 ## Quick Reference
 

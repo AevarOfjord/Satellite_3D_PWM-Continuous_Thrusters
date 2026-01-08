@@ -2,56 +2,71 @@
 Unit tests for config.py module.
 
 Tests configuration validation, parameter access, and configuration methods.
+
+V4.0.0: Tests updated to use SimulationConfig where possible.
+Some tests still use SatelliteConfig for deprecated API compatibility.
 """
 
 import numpy as np
 import pytest
 
-from src.satellite_control.config import SatelliteConfig
+# V4.0.0: Prefer SimulationConfig, but keep SatelliteConfig for deprecated API tests
+from src.satellite_control.config import SatelliteConfig  # DEPRECATED
+from src.satellite_control.config.simulation_config import SimulationConfig
 from src.satellite_control.config.validator import ConfigValidator
 
 
 class TestSatelliteConfigValidation:
-    """Test configuration validation methods."""
+    """Test configuration validation methods (V4.0.0: uses SimulationConfig)."""
 
     def test_validate_parameters_success(self):
         """Test that default parameters pass validation."""
+        # V4.0.0: Use SimulationConfig and ConfigValidator instead of SatelliteConfig
+        config = SimulationConfig.create_default()
         # Should not raise any exceptions
-        SatelliteConfig.validate_parameters()
+        ConfigValidator.validate_and_raise(config.app_config)
 
     def test_physical_parameters_are_positive(self):
         """Test that physical parameters are positive values."""
-        params = SatelliteConfig.get_satellite_params()
+        # V4.0.0: Use SimulationConfig instead of SatelliteConfig
+        config = SimulationConfig.create_default()
+        physics = config.app_config.physics
 
-        assert params["mass"] > 0, "Mass must be positive"
-        assert params["inertia"] > 0, "Inertia must be positive"
-        assert params["size"] > 0, "Size must be positive"
+        assert physics.total_mass > 0, "Mass must be positive"
+        assert physics.moment_of_inertia > 0, "Inertia must be positive"
+        assert physics.satellite_size > 0, "Size must be positive"
 
     def test_thruster_forces_are_positive(self):
         """Test that all thruster forces are positive."""
-        params = SatelliteConfig.get_satellite_params()
+        # V4.0.0: Use SimulationConfig instead of SatelliteConfig
+        config = SimulationConfig.create_default()
+        physics = config.app_config.physics
 
-        for thruster_id, force in params["thruster_forces"].items():
+        for thruster_id, force in physics.thruster_forces.items():
             assert force > 0, f"Thruster {thruster_id} force must be positive"
 
     def test_mpc_horizons_are_valid(self):
         """Test that MPC horizons are valid."""
-        params = SatelliteConfig.get_mpc_params()
+        # V4.0.0: Use SimulationConfig instead of SatelliteConfig
+        config = SimulationConfig.create_default()
+        mpc = config.app_config.mpc
 
-        assert params["prediction_horizon"] > 0
-        assert params["control_horizon"] > 0
-        assert params["control_horizon"] <= params["prediction_horizon"]
+        assert mpc.prediction_horizon > 0
+        assert mpc.control_horizon > 0
+        assert mpc.control_horizon <= mpc.prediction_horizon
 
     def test_cost_weights_are_positive(self):
         """Test that MPC cost weights are positive."""
-        params = SatelliteConfig.get_mpc_params()
+        # V4.0.0: Use SimulationConfig instead of SatelliteConfig
+        config = SimulationConfig.create_default()
+        mpc = config.app_config.mpc
 
-        assert params["q_position"] >= 0
-        assert params["q_velocity"] >= 0
-        assert params["q_angle"] >= 0
-        assert params["q_angular_velocity"] >= 0
-        assert params["r_thrust"] >= 0
-        assert params["r_switch"] >= 0
+        assert mpc.q_position >= 0
+        assert mpc.q_velocity >= 0
+        assert mpc.q_angle >= 0
+        assert mpc.q_angular_velocity >= 0
+        assert mpc.r_thrust >= 0
+        # Note: r_switch is not in MPCParams (was in old config)
 
 
 class TestSatelliteConfigGetters:
@@ -118,10 +133,11 @@ class TestSatelliteConfigGetters:
 
 
 class TestSatelliteConfigSetters:
-    """Test configuration setter methods."""
+    """Test configuration setter methods (V4.0.0: tests deprecated API for compatibility)."""
 
     def test_set_thruster_force_single(self):
-        """Test setting a single thruster force."""
+        """Test setting a single thruster force (deprecated API)."""
+        # V4.0.0: This tests deprecated SatelliteConfig API
         original = SatelliteConfig.THRUSTER_FORCES.copy()
 
         try:
@@ -133,17 +149,17 @@ class TestSatelliteConfigSetters:
             SatelliteConfig.THRUSTER_FORCES = original
 
     def test_set_thruster_force_invalid_id(self):
-        """Test that invalid thruster ID raises error."""
+        """Test that invalid thruster ID raises error (deprecated API)."""
+        # V4.0.0: This tests deprecated SatelliteConfig API
         with pytest.raises((ValueError, KeyError)):
-            SatelliteConfig.set_thruster_force(0, 0.5)  # ID should be 1-8
+            SatelliteConfig.set_thruster_force(0, 0.5)  # ID should be 1-12 (3D)
 
         with pytest.raises((ValueError, KeyError)):
-            SatelliteConfig.set_thruster_force(9, 0.5)  # ID should be 1-8
+            SatelliteConfig.set_thruster_force(13, 0.5)  # ID should be 1-12 (3D)
 
     def test_set_thruster_force_negative(self):
-        """Test that negative force raises error or is handled."""
-        # Depending on implementation, this might raise or be clamped
-        # Adjust based on actual config.py behavior
+        """Test that negative force raises error or is handled (deprecated API)."""
+        # V4.0.0: This tests deprecated SatelliteConfig API
         try:
             SatelliteConfig.set_thruster_force(1, -0.5)
             # If it doesn't raise, verify it's handled somehow
@@ -154,14 +170,16 @@ class TestSatelliteConfigSetters:
             pass
 
     def test_set_all_thruster_forces(self):
-        """Test setting all thruster forces at once."""
+        """Test setting all thruster forces at once (deprecated API)."""
+        # V4.0.0: This tests deprecated SatelliteConfig API
         original = SatelliteConfig.THRUSTER_FORCES.copy()
 
         try:
             SatelliteConfig.set_all_thruster_forces(0.6)
             params = SatelliteConfig.get_satellite_params()
 
-            for thruster_id in range(1, 9):
+            # V4.0.0: 3D system has 12 thrusters
+            for thruster_id in range(1, 13):
                 assert params["thruster_forces"][thruster_id] == 0.6
         finally:
             # Restore original
@@ -169,10 +187,12 @@ class TestSatelliteConfigSetters:
 
 
 class TestSatelliteConfigMissionModes:
-    """Test mission mode configuration."""
+    """Test mission mode configuration (V4.0.0: tests deprecated API for compatibility)."""
 
     def test_set_point_to_point_mode(self):
-        """Test setting point-to-point mission mode."""
+        """Test setting point-to-point mission mode (deprecated API)."""
+        # V4.0.0: This tests deprecated SatelliteConfig API
+        # Note: In V4.0.0, use MissionState.enable_waypoint_mode instead
         original_mode = getattr(SatelliteConfig, "ENABLE_WAYPOINT_MODE", False)
 
         try:
@@ -182,7 +202,9 @@ class TestSatelliteConfigMissionModes:
             SatelliteConfig.ENABLE_WAYPOINT_MODE = original_mode
 
     def test_set_multi_point_mode(self):
-        """Test setting multi-point mission mode (waypoint mode)."""
+        """Test setting multi-point mission mode (waypoint mode) (deprecated API)."""
+        # V4.0.0: This tests deprecated SatelliteConfig API
+        # Note: In V4.0.0, use MissionState.waypoint_targets instead
         original_mode = getattr(SatelliteConfig, "ENABLE_WAYPOINT_MODE", False)
         original_targets = (
             getattr(SatelliteConfig, "WAYPOINT_TARGETS", []).copy()
@@ -191,7 +213,7 @@ class TestSatelliteConfigMissionModes:
         )
 
         try:
-            targets = [(0.0, 0.0), (1.0, 0.0), (1.0, 1.0)]
+            targets = [(0.0, 0.0, 0.0), (1.0, 0.0, 0.0), (1.0, 1.0, 0.0)]  # 3D
             angles = [
                 (0.0, 0.0, 0.0),
                 (0.0, 0.0, np.pi / 2),
@@ -210,49 +232,69 @@ class TestSatelliteConfigMissionModes:
 
 
 class TestSatelliteConfigConstants:
-    """Test configuration constants and boundaries."""
+    """Test configuration constants and boundaries (V4.0.0: uses SimulationConfig)."""
 
     def test_simulation_dt_is_reasonable(self):
         """Test that simulation timestep is reasonable."""
-        assert 0.001 <= SatelliteConfig.SIMULATION_DT <= 0.1
+        # V4.0.0: Use SimulationConfig instead of SatelliteConfig
+        config = SimulationConfig.create_default()
+        dt = config.app_config.simulation.dt
+        assert 0.001 <= dt <= 0.1
 
     def test_control_dt_is_reasonable(self):
         """Test that control timestep is reasonable."""
-        assert 0.01 <= SatelliteConfig.CONTROL_DT <= 1.0
+        # V4.0.0: Use SimulationConfig instead of SatelliteConfig
+        config = SimulationConfig.create_default()
+        control_dt = config.app_config.simulation.control_dt
+        assert 0.01 <= control_dt <= 1.0
 
     def test_control_dt_is_multiple_of_simulation_dt(self):
         """Test that control DT is a multiple of simulation DT."""
-        ratio = SatelliteConfig.CONTROL_DT / SatelliteConfig.SIMULATION_DT
+        # V4.0.0: Use SimulationConfig instead of SatelliteConfig
+        config = SimulationConfig.create_default()
+        dt = config.app_config.simulation.dt
+        control_dt = config.app_config.simulation.control_dt
+        ratio = control_dt / dt
         assert (
             abs(ratio - round(ratio)) < 1e-6
         ), "Control DT should be multiple of simulation DT"
 
     def test_solver_time_limit_less_than_control_dt(self):
         """Test that solver has time budget within control interval."""
-        params = SatelliteConfig.get_mpc_params()
-        assert params["solver_time_limit"] < SatelliteConfig.CONTROL_DT
+        # V4.0.0: Use SimulationConfig instead of SatelliteConfig
+        config = SimulationConfig.create_default()
+        solver_time_limit = config.app_config.mpc.solver_time_limit
+        control_dt = config.app_config.simulation.control_dt
+        assert solver_time_limit < control_dt
 
     def test_workspace_bounds_are_positive(self):
         """Test that workspace boundaries are positive."""
-        params = SatelliteConfig.get_mpc_params()
-        assert params["position_bounds"] > 0
+        # V4.0.0: Use SimulationConfig instead of SatelliteConfig
+        config = SimulationConfig.create_default()
+        position_bounds = config.app_config.mpc.position_bounds
+        assert position_bounds > 0
 
     def test_velocity_limits_are_positive(self):
         """Test that velocity limits are positive."""
-        params = SatelliteConfig.get_mpc_params()
-        assert params["max_velocity"] > 0
-        assert params["max_angular_velocity"] > 0
+        # V4.0.0: Use SimulationConfig instead of SatelliteConfig
+        config = SimulationConfig.create_default()
+        mpc = config.app_config.mpc
+        assert mpc.max_velocity > 0
+        assert mpc.max_angular_velocity > 0
 
 
 class TestSatelliteConfigThrusterGeometry:
-    """Test thruster positions and directions."""
+    """Test thruster positions and directions (V4.0.0: uses SimulationConfig)."""
 
     def test_thruster_positions_are_valid(self):
         """Test that thruster positions are within satellite bounds."""
-        params = SatelliteConfig.get_satellite_params()
-        half_size = params["size"] / 2
+        # V4.0.0: Use SimulationConfig instead of SatelliteConfig
+        config = SimulationConfig.create_default()
+        physics = config.app_config.physics
+        half_size = physics.satellite_size / 2
 
-        for thruster_id, (x, y) in params["thruster_positions"].items():
+        for thruster_id, pos in physics.thruster_positions.items():
+            x, y = pos[0], pos[1]
             assert (
                 abs(x) <= half_size * 1.1
             ), f"Thruster {thruster_id} x position out of bounds"
@@ -262,9 +304,12 @@ class TestSatelliteConfigThrusterGeometry:
 
     def test_thruster_directions_are_unit_vectors(self):
         """Test that thruster directions are unit vectors."""
-        params = SatelliteConfig.get_satellite_params()
+        # V4.0.0: Use SimulationConfig instead of SatelliteConfig
+        config = SimulationConfig.create_default()
+        physics = config.app_config.physics
 
-        for thruster_id, (dx, dy) in params["thruster_directions"].items():
+        for thruster_id, direction in physics.thruster_directions.items():
+            dx, dy = direction[0], direction[1]
             magnitude = np.sqrt(dx**2 + dy**2)
             assert (
                 abs(magnitude - 1.0) < 1e-6
@@ -272,41 +317,45 @@ class TestSatelliteConfigThrusterGeometry:
 
     def test_thruster_ids_are_consistent(self):
         """Test that thruster IDs are consistent across dictionaries."""
-        params = SatelliteConfig.get_satellite_params()
+        # V4.0.0: Use SimulationConfig instead of SatelliteConfig
+        config = SimulationConfig.create_default()
+        physics = config.app_config.physics
 
-        force_ids = set(params["thruster_forces"].keys())
-        position_ids = set(params["thruster_positions"].keys())
-        direction_ids = set(params["thruster_directions"].keys())
+        force_ids = set(physics.thruster_forces.keys())
+        position_ids = set(physics.thruster_positions.keys())
+        direction_ids = set(physics.thruster_directions.keys())
 
         assert force_ids == position_ids == direction_ids
-        assert force_ids == set(range(1, 9))
+        # Note: V4.0.0 uses 12 thrusters (3D), not 8 (2D)
+        assert len(force_ids) == 12
 
 
 class TestSatelliteConfigIntegration:
-    """Integration tests for configuration system."""
+    """Integration tests for configuration system (V4.0.0: uses SimulationConfig)."""
 
     def test_config_supports_simulation_initialization(self):
         """Test that config provides all needed params for simulation."""
-        sat_params = SatelliteConfig.get_satellite_params()
-        mpc_params = SatelliteConfig.get_mpc_params()
+        # V4.0.0: Use SimulationConfig instead of SatelliteConfig
+        config = SimulationConfig.create_default()
 
         # Should be able to create simulation with these params
-        assert sat_params is not None
-        assert mpc_params is not None
-        assert isinstance(sat_params, dict)
-        assert isinstance(mpc_params, dict)
+        assert config.app_config.physics is not None
+        assert config.app_config.mpc is not None
+        assert config.app_config.simulation is not None
 
     def test_config_consistency_after_multiple_gets(self):
         """Test that config returns consistent values across multiple calls."""
-        params1 = SatelliteConfig.get_satellite_params()
-        params2 = SatelliteConfig.get_satellite_params()
+        # V4.0.0: Use SimulationConfig instead of SatelliteConfig
+        config1 = SimulationConfig.create_default()
+        config2 = SimulationConfig.create_default()
 
-        assert params1["mass"] == params2["mass"]
-        assert params1["inertia"] == params2["inertia"]
+        assert config1.app_config.physics.total_mass == config2.app_config.physics.total_mass
+        assert config1.app_config.physics.moment_of_inertia == config2.app_config.physics.moment_of_inertia
 
     def test_print_thruster_forces_does_not_crash(self):
-        """Test that print_thruster_forces executes without error."""
-        # This should not raise any exceptions
+        """Test that print_thruster_forces executes without error (deprecated API)."""
+        # V4.0.0: This tests deprecated SatelliteConfig API
+        # Should not raise any exceptions
         SatelliteConfig.print_thruster_forces()
 
 

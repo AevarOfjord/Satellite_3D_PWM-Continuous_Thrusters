@@ -19,7 +19,8 @@ import matplotlib.pyplot as plt
 from matplotlib.animation import FuncAnimation
 from pathlib import Path
 
-from src.satellite_control.config import SatelliteConfig
+# V4.0.0: SatelliteConfig removed - use SimulationConfig only
+from src.satellite_control.config.simulation_config import SimulationConfig
 from src.satellite_control.core.simulation import SatelliteMPCLinearizedSimulation
 
 # Suppress matplotlib animation GC warnings triggered during headless tests
@@ -66,7 +67,7 @@ def simple_simulation():
             "control_dt": 0.25,
         },
         "physics": {
-            "USE_REALISTIC_PHYSICS": False,  # Disable to avoid SatelliteConfig access issues
+            "use_realistic_physics": False,  # V4.0.0: Use SimulationConfig format
         },
     }
 
@@ -147,27 +148,15 @@ class TestPointToPointMission:
         """Test a single simulation step."""
         sim = simple_simulation
 
-        # Mock components to avoid SatelliteConfig access issues
-        # Simpler approach: mock draw_simulation to prevent visualization code
+        # V4.0.0: No need to mock SatelliteConfig - it's been removed
+        # Mock draw_simulation to prevent visualization code
         with (
-            patch(
-                "src.satellite_control.core.simulation.SatelliteConfig"
-            ) as mock_sim_config,
-            patch(
-                "src.satellite_control.mission.mission_state_manager.SatelliteConfig"
-            ) as mock_mission_config,
             patch.object(sim, "draw_simulation", return_value=[]),
             patch.object(
                 sim.mpc_controller, "get_control_action"
             ) as mock_mpc,
             patch.object(sim.mission_manager, "update_target_state", return_value=None),
         ):
-            # Configure mocks to disable realistic physics features
-            for mock_config in [mock_sim_config, mock_mission_config]:
-                mock_config.USE_REALISTIC_PHYSICS = False
-                mock_config.ENABLE_WAYPOINT_MODE = False
-                mock_config.DXF_SHAPE_MODE_ACTIVE = False
-                mock_config.ENABLE_RANDOM_DISTURBANCES = False
 
             mock_mpc.return_value = (
                 np.array([0, 0, 0, 0, 0, 0, 0, 0]),
@@ -193,53 +182,42 @@ class TestMultiPointMission:
     """Test multi-point navigation mission."""
 
     def test_multi_point_initialization(self):
-        """Test waypoint mission initialization."""
-        # config_overrides = {
-        #     "mission": {
-        #         "ENABLE_WAYPOINT_MODE": True,
-        #         "WAYPOINT_TARGETS": [(1.0, 0.0, 0.0), (0.0, 1.0, np.pi / 2)],
-        #         "CURRENT_TARGET_INDEX": 0,
-        #     }
-        # }  # Not currently used
-
-        # config = build_structured_config(config_overrides)  # Not currently used
-
-        with (
-            patch.object(SatelliteConfig, "ENABLE_WAYPOINT_MODE", True),
-            patch.object(
-                SatelliteConfig,
-                "WAYPOINT_TARGETS",
-                [(1.0, 0.0, 0.0), (0.0, 1.0, 0.0)],
-            ),
-            patch.object(SatelliteConfig, "CURRENT_TARGET_INDEX", 0),
-        ):
-            # This test would require more complex setup
-            # Just verify the concept is testable
-            pass
+        """Test waypoint mission initialization (V4.0.0: uses MissionState)."""
+        # V4.0.0: Waypoint mode is configured via MissionState, not SatelliteConfig
+        # This test verifies the concept is testable with the new config system
+        from src.satellite_control.config.mission_state import MissionState
+        
+        mission_state = MissionState(
+            enable_waypoint_mode=True,
+            waypoint_targets=[(1.0, 0.0, 0.0), (0.0, 1.0, 0.0)],
+            waypoint_angles=[(0.0, 0.0, 0.0), (0.0, 0.0, np.pi / 2)],
+            current_target_index=0,
+        )
+        
+        assert mission_state.enable_waypoint_mode is True
+        assert len(mission_state.waypoint_targets) == 2
+        assert mission_state.current_target_index == 0
 
     def test_multi_point_target_advancement(self):
-        """Test advancing to next target in waypoint mode."""
-        # Mock SatelliteConfig methods
-        with (
-            patch.object(SatelliteConfig, "ENABLE_WAYPOINT_MODE", True),
-            patch.object(
-                SatelliteConfig,
-                "WAYPOINT_TARGETS",
-                [(1.0, 0.0, 0.0), (0.0, 1.0, np.pi / 2)],
-            ),
-            patch.object(SatelliteConfig, "CURRENT_TARGET_INDEX", 0),
-            patch.object(SatelliteConfig, "advance_to_next_target") as mock_advance,
-            patch.object(SatelliteConfig, "get_current_waypoint_target") as mock_get,
-        ):
-            mock_advance.return_value = True
-            mock_get.return_value = ((0.0, 1.0, 0.0), (0.0, 0.0, np.pi / 2))
-
-            # Simulate target advancement
-            next_available = SatelliteConfig.advance_to_next_target()
-            assert next_available
-
-            target_pos, target_angle = SatelliteConfig.get_current_waypoint_target()
-            assert target_pos == (0.0, 1.0, 0.0)
+        """Test advancing to next target in waypoint mode (V4.0.0: uses MissionState)."""
+        # V4.0.0: Target advancement is handled by MissionStateManager, not SatelliteConfig
+        from src.satellite_control.config.mission_state import MissionState
+        
+        mission_state = MissionState(
+            enable_waypoint_mode=True,
+            waypoint_targets=[(1.0, 0.0, 0.0), (0.0, 1.0, 0.0)],
+            waypoint_angles=[(0.0, 0.0, 0.0), (0.0, 0.0, np.pi / 2)],
+            current_target_index=0,
+        )
+        
+        # Verify initial state
+        assert mission_state.current_target_index == 0
+        assert mission_state.waypoint_targets[0] == (1.0, 0.0, 0.0)
+        
+        # Simulate advancement (in real code, MissionStateManager handles this)
+        mission_state.current_target_index = 1
+        assert mission_state.current_target_index == 1
+        assert mission_state.waypoint_targets[1] == (0.0, 1.0, 0.0)
 
 
 class TestMPCSimulationIntegration:
@@ -394,9 +372,11 @@ class TestRealisticPhysics:
         # Check that noisy states differ
         differences = [np.linalg.norm(noisy - true_state) for noisy in noisy_states]
 
+        # V4.0.0: Check app_config.physics.use_realistic_physics instead
         # At least some should be different (not all zero due to randomness)
-        if SatelliteConfig.USE_REALISTIC_PHYSICS:
-            assert any(d > 0 for d in differences)
+        if sim.mission_manager and sim.mission_manager.app_config:
+            if sim.mission_manager.app_config.physics.use_realistic_physics:
+                assert any(d > 0 for d in differences)
 
     def test_thruster_delay_simulation(self, simple_simulation):
         """Test thruster command delay processing."""
@@ -440,10 +420,12 @@ class TestRealisticPhysics:
             for _ in range(5):
                 sim.update_simulation(0)
 
+            # V4.0.0: Check app_config.physics.use_realistic_physics instead
             # Velocity should decrease due to damping (if no thrusters active)
-            if SatelliteConfig.USE_REALISTIC_PHYSICS:
-                # Damping should reduce velocity over time
-                pass  # Can't guarantee without running actual physics
+            if sim.mission_manager and sim.mission_manager.app_config:
+                if sim.mission_manager.app_config.physics.use_realistic_physics:
+                    # Damping should reduce velocity over time
+                    pass  # Can't guarantee without running actual physics
 
 
 class TestErrorHandling:
@@ -570,9 +552,9 @@ class TestMissionCompletion:
         # Set target reached
         sim.target_reached_time = sim.simulation_time
 
-        # Advance time past stabilization
-        with patch.object(SatelliteConfig, "WAYPOINT_FINAL_STABILIZATION_TIME", 0.5):
-            sim.simulation_time = sim.target_reached_time + 1.0
+        # V4.0.0: Advance time past stabilization (no need to patch - use mission_manager)
+        # waypoint_final_stabilization_time is in app_config.simulation
+        sim.simulation_time = sim.target_reached_time + 1.0
 
             # Check if mission should complete
             # (This is handled in update_simulation)

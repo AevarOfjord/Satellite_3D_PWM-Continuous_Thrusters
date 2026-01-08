@@ -1019,9 +1019,10 @@ class PlotGenerator:
             if self.app_config and self.app_config.physics:
                 return len(self.app_config.physics.thruster_positions)
             else:
-                # Backward compatibility fallback
-                from src.satellite_control.config import SatelliteConfig
-                return len(SatelliteConfig.THRUSTER_POSITIONS)
+                # V4.0.0: Use default config if app_config not available
+                from src.satellite_control.config.simulation_config import SimulationConfig
+                default_config = SimulationConfig.create_default()
+                return len(default_config.app_config.physics.thruster_positions)
         except Exception:
             return 12
 

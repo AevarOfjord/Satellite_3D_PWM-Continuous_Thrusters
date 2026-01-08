@@ -454,21 +454,28 @@ class TestSensorNoise:
             omega=(0.0, 0.0, 0.05),
         )
 
-        # Apply noise multiple times with patched config
-        patch_path = (
-            "src.satellite_control.utils.simulation_state_validator.SatelliteConfig"
-        )
-        with patch(patch_path) as mock_config:
-            mock_config.USE_REALISTIC_PHYSICS = True
-            mock_config.POSITION_NOISE_STD = 0.01
-            mock_config.VELOCITY_NOISE_STD = 0.01
-            mock_config.ANGLE_NOISE_STD = 0.01
-            mock_config.ANGULAR_VELOCITY_NOISE_STD = 0.01
+        # V4.0.0: Patch app_config.physics instead of SatelliteConfig
+        # Create a mock app_config with noise parameters
+        from src.satellite_control.config.models import AppConfig, SatellitePhysicalParams
+        from unittest.mock import MagicMock
+        
+        mock_physics = MagicMock()
+        mock_physics.use_realistic_physics = True
+        mock_physics.position_noise_std = 0.01
+        mock_physics.velocity_noise_std = 0.01
+        mock_physics.angle_noise_std = 0.01
+        mock_physics.angular_velocity_noise_std = 0.01
+        
+        mock_app_config = MagicMock()
+        mock_app_config.physics = mock_physics
+        
+        # Patch the validator's app_config
+        validator.app_config = mock_app_config
 
-            noisy_states = [
-                validator.apply_sensor_noise(true_state, use_realistic_physics=True)
-                for _ in range(10)
-            ]
+        noisy_states = [
+            validator.apply_sensor_noise(true_state, use_realistic_physics=True)
+            for _ in range(10)
+        ]
 
         # Check that at least some are different (due to randomness)
         differences = [not np.array_equal(noisy, true_state) for noisy in noisy_states]

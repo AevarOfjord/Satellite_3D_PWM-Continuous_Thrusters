@@ -18,14 +18,9 @@ from src.satellite_control.core.simulation_loop import SimulationLoop
 
 @pytest.fixture
 def simulation_config():
-    """Create a test SimulationConfig."""
-    from src.satellite_control.config import SatelliteConfig
-
-    app_config = SatelliteConfig.get_app_config()
-    from src.satellite_control.config.mission_state import create_mission_state
-
-    mission_state = create_mission_state()
-    return SimulationConfig(app_config=app_config, mission_state=mission_state)
+    """Create a test SimulationConfig (V4.0.0: use create_default)."""
+    # V4.0.0: Use SimulationConfig.create_default() instead of SatelliteConfig
+    return SimulationConfig.create_default()
 
 
 @pytest.mark.integration

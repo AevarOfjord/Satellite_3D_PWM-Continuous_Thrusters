@@ -34,7 +34,7 @@ import logging
 
 import numpy as np
 
-from src.satellite_control.config import SatelliteConfig
+# V4.0.0: SatelliteConfig removed - use SimulationConfig/AppConfig/MissionState only
 from src.satellite_control.config.mission_state import MissionState
 from src.satellite_control.config.models import AppConfig
 from src.satellite_control.utils.orientation_utils import (
@@ -54,6 +54,8 @@ class MissionStateManager:
 
     def __init__(
         self,
+        mission_state: MissionState,  # V4.0.0: Required, no fallback
+        app_config: "AppConfig",  # V4.0.0: Required, no fallback
         position_tolerance: float = 0.05,
         angle_tolerance: float = 0.05,
         normalize_angle_func: Optional[Callable[[float], float]] = None,
@@ -61,8 +63,6 @@ class MissionStateManager:
         point_to_line_distance_func: Optional[
             Callable[[np.ndarray, np.ndarray, np.ndarray], float]
         ] = None,
-        mission_state: Optional[MissionState] = None,
-        app_config: Optional["AppConfig"] = None,  # V3.0.0: For timing parameters
     ):
         """
         Initialize mission state manager.
@@ -73,8 +73,14 @@ class MissionStateManager:
             normalize_angle_func: Function to normalize angles to [-pi, pi]
             angle_difference_func: Function to calculate angle difference
             point_to_line_distance_func: Point-to-line distance function
-            mission_state: Optional MissionState (preferred, eliminates global state)
+            mission_state: MissionState (required in V4.0.0)
+            app_config: AppConfig for timing parameters (required in V4.0.0)
         """
+        if mission_state is None:
+            raise ValueError("mission_state is required (V4.0.0: no SatelliteConfig fallback)")
+        if app_config is None:
+            raise ValueError("app_config is required (V4.0.0: no SatelliteConfig fallback)")
+        
         self.position_tolerance = position_tolerance
         self.angle_tolerance = angle_tolerance
 
@@ -85,11 +91,8 @@ class MissionStateManager:
             point_to_line_distance_func or self._default_point_to_line_distance
         )
         
-        # Use provided mission_state or fall back to creating new one
-        # Note: If None, will read from SatelliteConfig (backward compatibility)
+        # V4.0.0: Required, no fallback to SatelliteConfig
         self.mission_state = mission_state
-        
-        # V3.0.0: Store app_config for timing parameters
         self.app_config = app_config
 
         # Mission state tracking
@@ -115,257 +118,161 @@ class MissionStateManager:
         self._active_obstacle: Optional[Tuple[float, float, float]] = None
     
     def _update_dxf_phase(self, phase: str) -> None:
-        """Update DXF shape phase in mission_state and SatelliteConfig (backward compat)."""
-        if self.mission_state is not None:
-            self.mission_state.dxf_shape_phase = phase
-        # Backward compatibility
-        setattr(SatelliteConfig, "DXF_SHAPE_PHASE", phase)
+        """Update DXF shape phase in mission_state (V4.0.0: no SatelliteConfig fallback)."""
+        self.mission_state.dxf_shape_phase = phase
     
     def _get_dxf_phase(self) -> str:
-        """Get DXF shape phase from mission_state or SatelliteConfig."""
-        if self.mission_state is not None:
-            return self.mission_state.dxf_shape_phase or "POSITIONING"
-        return getattr(SatelliteConfig, "DXF_SHAPE_PHASE", "POSITIONING")
+        """Get DXF shape phase from mission_state (V4.0.0: required)."""
+        return self.mission_state.dxf_shape_phase or "POSITIONING"
     
     def _get_obstacles_enabled(self) -> bool:
-        """Get obstacles enabled status from mission_state or SatelliteConfig."""
-        if self.mission_state is not None:
-            return self.mission_state.obstacles_enabled
-        return getattr(SatelliteConfig, "OBSTACLES_ENABLED", False)
+        """Get obstacles enabled status from mission_state (V4.0.0: required)."""
+        return self.mission_state.obstacles_enabled
     
     def _get_obstacles(self) -> List[Tuple[float, float, float]]:
-        """Get obstacles list from mission_state or SatelliteConfig."""
-        if self.mission_state is not None:
-            return self.mission_state.obstacles
-        return SatelliteConfig.get_obstacles()
+        """Get obstacles list from mission_state (V4.0.0: required)."""
+        return self.mission_state.obstacles
     
     def _get_current_waypoint_target(self) -> Tuple[Optional[Tuple[float, float, float]], Optional[Tuple[float, float, float]]]:
         """
-        Get current waypoint target from mission_state or SatelliteConfig.
+        Get current waypoint target from mission_state (V4.0.0: required).
         
         Returns:
             Tuple of (target_pos, target_angle) or (None, None)
         """
-        if self.mission_state is not None:
-            # Use mission_state (preferred)
-            targets = self.mission_state.waypoint_targets or self.mission_state.multi_point_targets
-            angles = self.mission_state.waypoint_angles or self.mission_state.multi_point_angles
-            
-            if not targets or self.mission_state.current_target_index >= len(targets):
-                return None, None
-            
-            target_pos = targets[self.mission_state.current_target_index]
-            # Handle angle format (could be single float or tuple)
-            target_angle_raw = angles[self.mission_state.current_target_index]
-            if isinstance(target_angle_raw, (int, float)):
-                target_angle = (0.0, 0.0, float(target_angle_raw))
-            else:
-                target_angle = target_angle_raw
-            
-            return target_pos, target_angle
+        targets = self.mission_state.waypoint_targets or self.mission_state.multi_point_targets
+        angles = self.mission_state.waypoint_angles or self.mission_state.multi_point_angles
+        
+        if not targets or self.mission_state.current_target_index >= len(targets):
+            return None, None
+        
+        target_pos = targets[self.mission_state.current_target_index]
+        # Handle angle format (could be single float or tuple)
+        target_angle_raw = angles[self.mission_state.current_target_index]
+        if isinstance(target_angle_raw, (int, float)):
+            target_angle = (0.0, 0.0, float(target_angle_raw))
         else:
-            # Backward compatibility: use SatelliteConfig
-            return SatelliteConfig.get_current_waypoint_target()
+            target_angle = target_angle_raw
+        
+        return target_pos, target_angle
     
     def _advance_to_next_target(self) -> bool:
         """
-        Advance to next waypoint target in mission_state or SatelliteConfig.
+        Advance to next waypoint target in mission_state (V4.0.0: required).
         
         Returns:
             True if advanced, False if all targets completed
         """
-        if self.mission_state is not None:
-            # Use mission_state (preferred)
-            targets = self.mission_state.waypoint_targets or self.mission_state.multi_point_targets
-            if not targets:
-                return False
-            
-            self.mission_state.current_target_index += 1
-            self.mission_state.target_stabilization_start_time = None
-            
-            if self.mission_state.current_target_index >= len(targets):
-                return False
-            return True
-        else:
-            # Backward compatibility: use SatelliteConfig
-            return SatelliteConfig.advance_to_next_target()
+        targets = self.mission_state.waypoint_targets or self.mission_state.multi_point_targets
+        if not targets:
+            return False
+        
+        self.mission_state.current_target_index += 1
+        self.mission_state.target_stabilization_start_time = None
+        
+        if self.mission_state.current_target_index >= len(targets):
+            return False
+        return True
     
     def _get_current_target_index(self) -> int:
-        """Get current target index from mission_state or SatelliteConfig."""
-        if self.mission_state is not None:
-            return self.mission_state.current_target_index
-        else:
-            return getattr(SatelliteConfig, "CURRENT_TARGET_INDEX", 0)
+        """Get current target index from mission_state (V4.0.0: required)."""
+        return self.mission_state.current_target_index
     
     def _get_waypoint_targets(self) -> List[Tuple[float, float, float]]:
-        """Get waypoint targets from mission_state or SatelliteConfig."""
-        if self.mission_state is not None:
-            return self.mission_state.waypoint_targets or self.mission_state.multi_point_targets
-        else:
-            return getattr(SatelliteConfig, "WAYPOINT_TARGETS", []) or getattr(SatelliteConfig, "MULTI_POINT_TARGETS", [])
+        """Get waypoint targets from mission_state (V4.0.0: required)."""
+        return self.mission_state.waypoint_targets or self.mission_state.multi_point_targets
     
     def _get_dxf_shape_path(self) -> List[Tuple[float, float, float]]:
-        """Get DXF shape path from mission_state or SatelliteConfig."""
-        if self.mission_state is not None:
-            return self.mission_state.dxf_shape_path
-        else:
-            return getattr(SatelliteConfig, "DXF_SHAPE_PATH", [])
+        """Get DXF shape path from mission_state (V4.0.0: required)."""
+        return self.mission_state.dxf_shape_path
     
     def _get_dxf_target_speed(self) -> float:
-        """Get DXF target speed from mission_state or SatelliteConfig."""
-        if self.mission_state is not None:
-            return self.mission_state.dxf_target_speed
-        else:
-            return getattr(SatelliteConfig, "DXF_TARGET_SPEED", 0.1)
+        """Get DXF target speed from mission_state (V4.0.0: required)."""
+        return self.mission_state.dxf_target_speed
     
     def _get_dxf_closest_point_index(self) -> int:
-        """Get DXF closest point index from mission_state or SatelliteConfig."""
-        if self.mission_state is not None:
-            return self.mission_state.dxf_closest_point_index
-        else:
-            return getattr(SatelliteConfig, "DXF_CLOSEST_POINT_INDEX", 0)
+        """Get DXF closest point index from mission_state (V4.0.0: required)."""
+        return self.mission_state.dxf_closest_point_index
     
     def _get_dxf_path_length(self) -> float:
-        """Get DXF path length from mission_state or SatelliteConfig."""
-        if self.mission_state is not None:
-            return self.mission_state.dxf_path_length
-        else:
-            return getattr(SatelliteConfig, "DXF_PATH_LENGTH", 0.0)
+        """Get DXF path length from mission_state (V4.0.0: required)."""
+        return self.mission_state.dxf_path_length
     
     def _get_dxf_tracking_start_time(self) -> Optional[float]:
-        """Get DXF tracking start time from mission_state or SatelliteConfig."""
-        if self.mission_state is not None:
-            return self.mission_state.dxf_tracking_start_time
-        else:
-            return getattr(SatelliteConfig, "DXF_TRACKING_START_TIME", None)
+        """Get DXF tracking start time from mission_state (V4.0.0: required)."""
+        return self.mission_state.dxf_tracking_start_time
     
     def _get_dxf_positioning_start_time(self) -> Optional[float]:
-        """Get DXF positioning start time from mission_state or SatelliteConfig."""
-        if self.mission_state is not None:
-            return getattr(self.mission_state, "dxf_positioning_start_time", None)
-        else:
-            return getattr(SatelliteConfig, "DXF_POSITIONING_START_TIME", None)
+        """Get DXF positioning start time from mission_state (V4.0.0: required)."""
+        return getattr(self.mission_state, "dxf_positioning_start_time", None)
     
     def _set_dxf_positioning_start_time(self, value: float) -> None:
-        """Set DXF positioning start time in mission_state or SatelliteConfig."""
-        if self.mission_state is not None:
-            setattr(self.mission_state, "dxf_positioning_start_time", value)
-        # Backward compatibility
-        setattr(SatelliteConfig, "DXF_POSITIONING_START_TIME", value)
+        """Set DXF positioning start time in mission_state (V4.0.0: no SatelliteConfig)."""
+        setattr(self.mission_state, "dxf_positioning_start_time", value)
     
     def _get_dxf_current_target_position(self) -> Optional[Tuple[float, float]]:
-        """Get DXF current target position from mission_state or SatelliteConfig."""
-        if self.mission_state is not None:
-            return getattr(self.mission_state, "dxf_current_target_position", None)
-        else:
-            return getattr(SatelliteConfig, "DXF_CURRENT_TARGET_POSITION", None)
+        """Get DXF current target position from mission_state (V4.0.0: required)."""
+        return getattr(self.mission_state, "dxf_current_target_position", None)
     
     def _set_dxf_current_target_position(self, value: Optional[Tuple[float, float]]) -> None:
-        """Set DXF current target position in mission_state or SatelliteConfig."""
-        if self.mission_state is not None:
-            setattr(self.mission_state, "dxf_current_target_position", value)
-        # Backward compatibility
-        setattr(SatelliteConfig, "DXF_CURRENT_TARGET_POSITION", value)
+        """Set DXF current target position in mission_state (V4.0.0: no SatelliteConfig)."""
+        setattr(self.mission_state, "dxf_current_target_position", value)
     
     def _get_dxf_final_position(self) -> Optional[Tuple[float, float]]:
-        """Get DXF final position from mission_state or SatelliteConfig."""
-        if self.mission_state is not None:
-            return self.mission_state.dxf_final_position
-        else:
-            return getattr(SatelliteConfig, "DXF_FINAL_POSITION", None)
+        """Get DXF final position from mission_state (V4.0.0: required)."""
+        return self.mission_state.dxf_final_position
     
     def _set_dxf_final_position(self, value: Optional[Tuple[float, float]]) -> None:
-        """Set DXF final position in mission_state or SatelliteConfig."""
-        if self.mission_state is not None:
-            self.mission_state.dxf_final_position = value
-        # Backward compatibility
-        setattr(SatelliteConfig, "DXF_FINAL_POSITION", value)
+        """Set DXF final position in mission_state (V4.0.0: no SatelliteConfig)."""
+        self.mission_state.dxf_final_position = value
     
     def _get_dxf_stabilization_start_time(self) -> Optional[float]:
-        """Get DXF stabilization start time from mission_state or SatelliteConfig."""
-        if self.mission_state is not None:
-            return self.mission_state.dxf_stabilization_start_time
-        else:
-            return getattr(SatelliteConfig, "DXF_STABILIZATION_START_TIME", None)
+        """Get DXF stabilization start time from mission_state (V4.0.0: required)."""
+        return self.mission_state.dxf_stabilization_start_time
     
     def _set_dxf_stabilization_start_time(self, value: Optional[float]) -> None:
-        """Set DXF stabilization start time in mission_state or SatelliteConfig."""
-        if self.mission_state is not None:
-            self.mission_state.dxf_stabilization_start_time = value
-        # Backward compatibility
-        setattr(SatelliteConfig, "DXF_STABILIZATION_START_TIME", value)
+        """Set DXF stabilization start time in mission_state (V4.0.0: no SatelliteConfig)."""
+        self.mission_state.dxf_stabilization_start_time = value
     
     def _get_dxf_target_start_distance(self) -> float:
-        """Get DXF target start distance from mission_state or SatelliteConfig."""
-        if self.mission_state is not None:
-            return getattr(self.mission_state, "dxf_target_start_distance", 0.0)
-        else:
-            return getattr(SatelliteConfig, "DXF_TARGET_START_DISTANCE", 0.0)
+        """Get DXF target start distance from mission_state (V4.0.0: required)."""
+        return getattr(self.mission_state, "dxf_target_start_distance", 0.0)
     
     def _set_dxf_target_start_distance(self, value: float) -> None:
-        """Set DXF target start distance in mission_state or SatelliteConfig."""
-        if self.mission_state is not None:
-            setattr(self.mission_state, "dxf_target_start_distance", value)
-        # Backward compatibility
-        setattr(SatelliteConfig, "DXF_TARGET_START_DISTANCE", value)
+        """Set DXF target start distance in mission_state (V4.0.0: no SatelliteConfig)."""
+        setattr(self.mission_state, "dxf_target_start_distance", value)
     
     def _get_dxf_has_return(self) -> bool:
-        """Get DXF has return flag from mission_state or SatelliteConfig."""
-        if self.mission_state is not None:
-            return self.mission_state.dxf_has_return
-        else:
-            return getattr(SatelliteConfig, "DXF_HAS_RETURN", False)
+        """Get DXF has return flag from mission_state (V4.0.0: required)."""
+        return self.mission_state.dxf_has_return
     
     def _get_waypoint_final_stabilization_time(self) -> float:
-        """Get waypoint final stabilization time from app_config or SatelliteConfig."""
-        if self.app_config is not None:
-            return self.app_config.simulation.waypoint_final_stabilization_time
-        else:
-            return SatelliteConfig.WAYPOINT_FINAL_STABILIZATION_TIME
+        """Get waypoint final stabilization time from app_config (V4.0.0: required)."""
+        return self.app_config.simulation.waypoint_final_stabilization_time
     
     def _get_target_hold_time(self) -> float:
-        """Get target hold time from app_config or SatelliteConfig."""
-        if self.app_config is not None:
-            return self.app_config.simulation.target_hold_time
-        else:
-            return getattr(SatelliteConfig, "TARGET_HOLD_TIME", 3.0)
+        """Get target hold time from app_config (V4.0.0: required)."""
+        return self.app_config.simulation.target_hold_time
     
     def _get_shape_positioning_stabilization_time(self) -> float:
-        """Get shape positioning stabilization time from app_config or SatelliteConfig."""
-        if self.app_config is not None:
-            return self.app_config.simulation.shape_positioning_stabilization_time
-        else:
-            return SatelliteConfig.SHAPE_POSITIONING_STABILIZATION_TIME
+        """Get shape positioning stabilization time from app_config (V4.0.0: required)."""
+        return self.app_config.simulation.shape_positioning_stabilization_time
     
     def _get_shape_final_stabilization_time(self) -> float:
-        """Get shape final stabilization time from app_config or SatelliteConfig."""
-        if self.app_config is not None:
-            return self.app_config.simulation.shape_final_stabilization_time
-        else:
-            return SatelliteConfig.SHAPE_FINAL_STABILIZATION_TIME
+        """Get shape final stabilization time from app_config (V4.0.0: required)."""
+        return self.app_config.simulation.shape_final_stabilization_time
     
     def _get_control_dt(self) -> float:
-        """Get control dt from app_config or SatelliteConfig."""
-        if self.app_config is not None:
-            return self.app_config.simulation.control_dt
-        else:
-            # Backward compatibility fallback
-            from src.satellite_control.config import SatelliteConfig
-            return getattr(SatelliteConfig, "CONTROL_DT", 0.05)
+        """Get control dt from app_config (V4.0.0: required)."""
+        return self.app_config.simulation.control_dt
     
     def _set_multi_point_phase(self, phase: str) -> None:
-        """Set multi-point phase in mission_state or SatelliteConfig."""
-        if self.mission_state is not None:
-            self.mission_state.multi_point_phase = phase
-        # Backward compatibility
-        SatelliteConfig.MULTI_POINT_PHASE = phase  # type: ignore
+        """Set multi-point phase in mission_state (V4.0.0: no SatelliteConfig)."""
+        self.mission_state.multi_point_phase = phase
     
     def _get_waypoint_targets_old(self) -> List[Tuple[float, float, float]]:
-        """Get waypoint targets from mission_state or SatelliteConfig (old method - for compatibility)."""
-        if self.mission_state is not None:
-            return self.mission_state.waypoint_targets or self.mission_state.multi_point_targets
-        else:
-            return getattr(SatelliteConfig, "WAYPOINT_TARGETS", [])
+        """Get waypoint targets from mission_state (V4.0.0: required, legacy method name)."""
+        return self.mission_state.waypoint_targets or self.mission_state.multi_point_targets
 
     def _create_3d_state(
         self,
@@ -429,35 +336,20 @@ class MissionStateManager:
 
         current_quat = current_state[3:7]
 
-        # Determine active mode
-        # Use mission_state if available, otherwise fall back to SatelliteConfig
-        if self.mission_state is not None:
-            is_dxf = self.mission_state.dxf_shape_mode_active
-        else:
-            # Backward compatibility: read from SatelliteConfig
-            is_dxf = getattr(SatelliteConfig, "DXF_SHAPE_MODE_ACTIVE", False)
+        # Determine active mode (V4.0.0: mission_state required)
+        is_dxf = self.mission_state.dxf_shape_mode_active
 
         # 3D Position for internal logic
         curr_pos_3d = current_state[:3]
 
         if is_dxf:
             # --- SHAPE FOLLOWING PREDICTION ---
-            # Use mission_state if available, otherwise fall back to SatelliteConfig
-            if self.mission_state is not None:
-                path = self.mission_state.dxf_shape_path
-                phase = self.mission_state.dxf_shape_phase
-                start_time = self.mission_state.dxf_tracking_start_time
-                speed = self.mission_state.dxf_target_speed
-                path_len = max(self.mission_state.dxf_path_length, 1e-9)
-                closest_point_idx = self.mission_state.dxf_closest_point_index
-            else:
-                # Backward compatibility: read from SatelliteConfig
-                path = self._get_dxf_shape_path()
-                phase = self._get_dxf_phase()
-                start_time = self._get_dxf_tracking_start_time()
-                speed = self._get_dxf_target_speed()
-                path_len = max(self._get_dxf_path_length(), 1e-9)
-                closest_point_idx = self._get_dxf_closest_point_index()
+            path = self.mission_state.dxf_shape_path
+            phase = self.mission_state.dxf_shape_phase
+            start_time = self.mission_state.dxf_tracking_start_time
+            speed = self.mission_state.dxf_target_speed
+            path_len = max(self.mission_state.dxf_path_length, 1e-9)
+            closest_point_idx = self.mission_state.dxf_closest_point_index
 
             if phase == "TRACKING" and start_time is not None:
 
@@ -558,7 +450,8 @@ class MissionStateManager:
             return True
 
         obs_x, obs_y, obs_radius = self._active_obstacle
-        safety = getattr(SatelliteConfig, "OBSTACLE_AVOIDANCE_SAFETY_MARGIN", 0.5)  # V3.0.0: TODO - move to config
+        # V4.0.0: Use hardcoded safety margin (could be moved to AppConfig in future)
+        safety = 0.5
 
         # Calculate distance from obstacle center to path line
         start = current_pos[:2]
@@ -640,31 +533,17 @@ class MissionStateManager:
         Returns:
             Target state vector [pos(3), quat(4), vel(3), w(3)] or None
         """
-        # Waypoint mode
-        # Use mission_state if available, otherwise fall back to SatelliteConfig
-        enable_waypoint = False
-        if self.mission_state is not None:
-            enable_waypoint = (
-                self.mission_state.enable_waypoint_mode
-                or self.mission_state.enable_multi_point_mode
-            )
-        else:
-            # Backward compatibility
-            from src.satellite_control.config import SatelliteConfig
-            enable_waypoint = getattr(SatelliteConfig, "ENABLE_WAYPOINT_MODE", False)
+        # Waypoint mode (V4.0.0: mission_state required)
+        enable_waypoint = (
+            self.mission_state.enable_waypoint_mode
+            or self.mission_state.enable_multi_point_mode
+        )
         
         if enable_waypoint:
             return self._handle_multi_point_mode(current_position, current_quat, current_time)
 
-        # DXF shape mode
-        # Use mission_state if available, otherwise fall back to SatelliteConfig
-        is_dxf = False
-        if self.mission_state is not None:
-            is_dxf = self.mission_state.dxf_shape_mode_active
-        else:
-            # Backward compatibility
-            from src.satellite_control.config import SatelliteConfig
-            is_dxf = getattr(SatelliteConfig, "DXF_SHAPE_MODE_ACTIVE", False)
+        # DXF shape mode (V4.0.0: mission_state required)
+        is_dxf = self.mission_state.dxf_shape_mode_active
         
         if is_dxf:
             return self._handle_dxf_shape_mode(current_position, current_quat, current_time)
@@ -711,7 +590,7 @@ class MissionStateManager:
                         target_pos=np.array(final_target_pos),
                         obstacle_center=np.array([obs_x, obs_y]),
                         obstacle_radius=obs_radius,
-                        safety_margin=SatelliteConfig.OBSTACLE_AVOIDANCE_SAFETY_MARGIN,
+                        safety_margin=0.5,  # V4.0.0: Hardcoded (could be in AppConfig)
                     )
                     if spline is not None:
                         self.avoidance_spline = spline
@@ -842,20 +721,12 @@ class MissionStateManager:
             logger.info(" Mission module not available for DXF shape mode")
             return None
 
-        # Initialize mission start time
-        # Get path from mission_state or SatelliteConfig
-        if self.mission_state is not None:
-            path = self.mission_state.dxf_shape_path
-            mission_start_time = self.mission_state.dxf_mission_start_time
-        else:
-            path: List[Tuple[float, float, float]] = SatelliteConfig.DXF_SHAPE_PATH
-            mission_start_time = getattr(SatelliteConfig, "DXF_MISSION_START_TIME", None)
+        # Initialize mission start time (V4.0.0: mission_state required)
+        path = self.mission_state.dxf_shape_path
+        mission_start_time = self.mission_state.dxf_mission_start_time
         
         if mission_start_time is None:
-            if self.mission_state is not None:
-                self.mission_state.dxf_mission_start_time = current_time
-            # Backward compatibility
-            setattr(SatelliteConfig, "DXF_MISSION_START_TIME", current_time)
+            self.mission_state.dxf_mission_start_time = current_time
             min_dist = float("inf")
             closest_idx = 0
             closest_point = path[0]
@@ -867,12 +738,8 @@ class MissionStateManager:
                     closest_idx = i
                     closest_point = point
 
-            if self.mission_state is not None:
-                self.mission_state.dxf_closest_point_index = closest_idx
-                self.mission_state.dxf_current_target_position = closest_point
-            # Backward compatibility
-            setattr(SatelliteConfig, "DXF_CLOSEST_POINT_INDEX", closest_idx)
-            setattr(SatelliteConfig, "DXF_CURRENT_TARGET_POSITION", closest_point)
+            self.mission_state.dxf_closest_point_index = closest_idx
+            self.mission_state.dxf_current_target_position = closest_point
 
             # Calculate total path length
             total_length: float = 0.0
@@ -883,23 +750,16 @@ class MissionStateManager:
                     np.linalg.norm(np.array(path[next_idx]) - np.array(path[idx]))
                 )
 
-            if self.mission_state is not None:
-                self.mission_state.dxf_path_length = total_length
-            # Backward compatibility
-            setattr(SatelliteConfig, "DXF_PATH_LENGTH", total_length)
+            self.mission_state.dxf_path_length = total_length
 
             logger.info(f" PROFILE FOLLOWING MISSION STARTED at t={current_time:.2f}s")
             cx, cy = closest_point[0], closest_point[1]
             logger.info(f"   Phase 1: Moving to closest point on path " f"({cx:.3f}, {cy:.3f})")
             logger.info(f" Profile path length: {total_length:.3f} m")
 
-        # Get path and phase from mission_state or SatelliteConfig
-        if self.mission_state is not None:
-            dxf_path = self.mission_state.dxf_shape_path
-            phase = self._get_dxf_phase()
-        else:
-            dxf_path: List[Tuple[float, float]] = SatelliteConfig.DXF_SHAPE_PATH
-            phase = getattr(SatelliteConfig, "DXF_SHAPE_PHASE", "POSITIONING")
+        # Get path and phase from mission_state (V4.0.0: required)
+        dxf_path = self.mission_state.dxf_shape_path
+        phase = self._get_dxf_phase()
 
         # Phase 1: POSITIONING
         if phase == "POSITIONING":
@@ -966,10 +826,7 @@ class MissionStateManager:
             if self.shape_stabilization_start_time is None:
                 self.shape_stabilization_start_time = current_time
                 self._update_dxf_phase("PATH_STABILIZATION")
-                if self.mission_state is not None:
-                    self.mission_state.dxf_stabilization_start_time = current_time
-                # Backward compatibility
-                setattr(SatelliteConfig, "DXF_PATH_STABILIZATION_START_TIME", current_time)
+                self.mission_state.dxf_stabilization_start_time = current_time
                 stab_time = self._get_shape_positioning_stabilization_time()
                 logger.info(
                     f" Reached starting position, stabilizing for "
@@ -980,11 +837,8 @@ class MissionStateManager:
                 stab_time = self._get_shape_positioning_stabilization_time()
                 if stabilization_time >= stab_time:
                     self._update_dxf_phase("TRACKING")
-                    if self.mission_state is not None:
-                        self.mission_state.dxf_tracking_start_time = current_time
-                        self.mission_state.dxf_target_start_distance = 0.0
-                    # Backward compatibility
-                    setattr(SatelliteConfig, "DXF_TRACKING_START_TIME", current_time)
+                    self.mission_state.dxf_tracking_start_time = current_time
+                    self.mission_state.dxf_target_start_distance = 0.0
                     self._set_dxf_target_start_distance(0.0)
                     logger.info(" Satellite stable! Starting profile tracking...")
                     speed = self._get_dxf_target_speed()
@@ -1025,10 +879,7 @@ class MissionStateManager:
                 if self.final_waypoint_stabilization_start_time is None:
                     self.final_waypoint_stabilization_start_time = current_time
                     self._update_dxf_phase("PATH_STABILIZATION")
-                    if self.mission_state is not None:
-                        self.mission_state.dxf_final_position = current_path_position
-                    # Backward compatibility
-                    setattr(SatelliteConfig, "DXF_PATH_STABILIZATION_START_TIME", current_time)
+                    self.mission_state.dxf_final_position = current_path_position
                     self._set_dxf_final_position(current_path_position)
                     stab_time = self._get_shape_positioning_stabilization_time()
                     logger.info(
@@ -1081,27 +932,24 @@ class MissionStateManager:
         )
 
         # Determine if we're stabilizing at start or end based on which timer is active
-        # and whether DXF_FINAL_POSITION has been set
-        is_end_stabilization = (
-            hasattr(SatelliteConfig, "DXF_FINAL_POSITION")
-            and SatelliteConfig.DXF_FINAL_POSITION is not None
-        )
+        # and whether DXF_FINAL_POSITION has been set (V4.0.0: use mission_state)
+        is_end_stabilization = self.mission_state.dxf_final_position is not None
 
         if is_end_stabilization:
             # Stabilizing at END of path (before returning)
-            target_pos = SatelliteConfig.DXF_FINAL_POSITION
-            path_s = getattr(SatelliteConfig, "DXF_PATH_LENGTH", 0.0)
+            target_pos = self.mission_state.dxf_final_position
+            path_s = self.mission_state.dxf_path_length
         else:
             # Stabilizing at START of path (before tracking begins)
-            target_pos = SatelliteConfig.DXF_CURRENT_TARGET_POSITION
+            target_pos = getattr(self.mission_state, "dxf_current_target_position", None)
             path_s = 0.0
 
-        target_orientation = get_path_tangent_orientation(
-            path, path_s, SatelliteConfig.DXF_CLOSEST_POINT_INDEX
-        )
-        target_pos = getattr(SatelliteConfig, "DXF_CURRENT_TARGET_POSITION", None)
         if target_pos is None:
             return None
+
+        target_orientation = get_path_tangent_orientation(
+            path, path_s, self.mission_state.dxf_closest_point_index
+        )
 
         target_state = self._create_3d_state(
             target_pos[0],
@@ -1122,19 +970,16 @@ class MissionStateManager:
                     self.final_waypoint_stabilization_start_time = current_time
                     logger.info(
                         " Satellite reached final waypoint. Stabilizing for "
-                        f"{self.app_config.simulation.shape_positioning_stabilization_time if self.app_config else SatelliteConfig.SHAPE_POSITIONING_STABILIZATION_TIME:.1f}s "
+                        f"{self.app_config.simulation.shape_positioning_stabilization_time:.1f}s "
                         "before return..."
                     )
                 else:
                     stabilization_time = current_time - self.final_waypoint_stabilization_start_time
                     stab_time = self._get_shape_positioning_stabilization_time()
                     if stabilization_time >= stab_time:
-                        # V3.0.0: Update mission_state instead of SatelliteConfig
-                        if self.mission_state:
-                            self.mission_state.dxf_shape_phase = "RETURNING"
-                        from src.satellite_control.config import SatelliteConfig
-                        setattr(SatelliteConfig, "DXF_RETURN_START_TIME", current_time)
-                        return_pos = getattr(SatelliteConfig, "DXF_RETURN_POSITION", None)
+                        # V4.0.0: Update mission_state only (no SatelliteConfig)
+                        self.mission_state.dxf_shape_phase = "RETURNING"
+                        return_pos = getattr(self.mission_state, "dxf_return_position", None)
                         logger.info(" Path stabilization complete!")
                         if return_pos is not None:
                             rx, ry = return_pos[0], return_pos[1]
@@ -1158,9 +1003,7 @@ class MissionStateManager:
                     if self.mission_state is not None:
                         self.mission_state.dxf_tracking_start_time = current_time
                         self.mission_state.dxf_target_start_distance = 0.0
-                    # Backward compatibility
-                    setattr(SatelliteConfig, "DXF_TRACKING_START_TIME", current_time)
-                    self._set_dxf_target_start_distance(0.0)
+                        self._set_dxf_target_start_distance(0.0)
                     logger.info(" Path stabilization complete! Starting profile tracking...")
                     logger.info(f"   Target speed: {self._get_dxf_target_speed():.2f} m/s")
                     self.shape_stabilization_start_time = None
@@ -1181,14 +1024,15 @@ class MissionStateManager:
             get_path_tangent_orientation,
         )
 
-        final_pos = getattr(SatelliteConfig, "DXF_FINAL_POSITION", None)
+        # V4.0.0: Use mission_state only
+        final_pos = self.mission_state.dxf_final_position
         if final_pos is None:
             return None
 
         # Determine target orientation: use return angle if at return position,
         # otherwise use path tangent
-        has_return = getattr(SatelliteConfig, "DXF_HAS_RETURN", False)
-        return_pos = getattr(SatelliteConfig, "DXF_RETURN_POSITION", None)
+        has_return = self.mission_state.dxf_has_return
+        return_pos = getattr(self.mission_state, "dxf_return_position", None)
         at_return_position = (
             has_return
             and return_pos is not None
@@ -1199,13 +1043,13 @@ class MissionStateManager:
         if at_return_position:
             # Stabilizing at return position - use return angle
             target_orientation = getattr(
-                SatelliteConfig, "DXF_RETURN_ANGLE", (0.0, 0.0, 0.0)
+                self.mission_state, "dxf_return_angle", (0.0, 0.0, 0.0)
             ) or (0.0, 0.0, 0.0)
         else:
             # Stabilizing at end of path - use path tangent
-            end_s = getattr(SatelliteConfig, "DXF_PATH_LENGTH", 0.0)
+            end_s = self.mission_state.dxf_path_length
             target_orientation = get_path_tangent_orientation(
-                path, end_s, SatelliteConfig.DXF_CLOSEST_POINT_INDEX
+                path, end_s, self.mission_state.dxf_closest_point_index
             )
 
         target_state = self._create_3d_state(
@@ -1239,10 +1083,10 @@ class MissionStateManager:
         current_quat: np.ndarray,
         current_time: float,
     ) -> Optional[np.ndarray]:
-        """Handle DXF returning phase."""
-        return_pos = getattr(SatelliteConfig, "DXF_RETURN_POSITION", (0.0, 0.0))
+        """Handle DXF returning phase (V4.0.0: use mission_state only)."""
+        return_pos = getattr(self.mission_state, "dxf_return_position", (0.0, 0.0))
         return_angle = getattr(
-            SatelliteConfig, "DXF_RETURN_ANGLE", (0.0, 0.0, 0.0)
+            self.mission_state, "dxf_return_angle", (0.0, 0.0, 0.0)
         ) or (0.0, 0.0, 0.0)
 
         target_state = self._create_3d_state(
@@ -1260,9 +1104,9 @@ class MissionStateManager:
                 # Reached return position - transition to STABILIZING phase
                 if self.return_stabilization_start_time is None:
                     self.return_stabilization_start_time = current_time
-                    SatelliteConfig.DXF_SHAPE_PHASE = "STABILIZING"
-                    setattr(SatelliteConfig, "DXF_STABILIZATION_START_TIME", current_time)
-                    setattr(SatelliteConfig, "DXF_FINAL_POSITION", return_pos)
+                    self.mission_state.dxf_shape_phase = "STABILIZING"
+                    self.mission_state.dxf_stabilization_start_time = current_time
+                    self.mission_state.dxf_final_position = return_pos
                     logger.info(
                         " Reached return position! " "Transitioning to final stabilization..."
                     )

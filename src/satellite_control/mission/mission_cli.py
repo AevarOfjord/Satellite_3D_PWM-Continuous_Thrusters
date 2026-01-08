@@ -10,7 +10,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import numpy as np
 
-from src.satellite_control.config import SatelliteConfig
+# V4.0.0: SatelliteConfig removed - use SimulationConfig/MissionState only
 from src.satellite_control.config.simulation_config import SimulationConfig
 from src.satellite_control.mission.mission_logic import MissionLogic
 
@@ -243,54 +243,6 @@ class MissionCLI:
         
         return obstacles
 
-    def _obstacle_edit_menu(self) -> None:
-        """Interactive menu to edit/remove obstacles after config (legacy mode)."""
-        while True:
-            obstacles = SatelliteConfig.get_obstacles()
-            if not obstacles:
-                print("\nNo obstacles configured.")
-                break
-
-            print(f"\nCurrent obstacles ({len(obstacles)}):")
-            for i, (x, y, r) in enumerate(obstacles, 1):
-                print(f"  {i}. ({x:.2f}, {y:.2f}) r={r:.2f}")
-
-            print("\nOptions: [A]dd, [E]dit #, [R]emove #, [C]lear all, [D]one")
-            choice = input("Choice: ").strip().lower()
-
-            if choice == "d" or choice == "":
-                break
-            elif choice == "a":
-                self._add_single_obstacle()
-            elif choice == "c":
-                SatelliteConfig.clear_obstacles()
-                SatelliteConfig.OBSTACLES_ENABLED = False
-                print("  All obstacles cleared.")
-                break
-            elif choice.startswith("e") and len(choice) > 1:
-                try:
-                    idx = int(choice[1:].strip()) - 1
-                    if 0 <= idx < len(obstacles):
-                        self._edit_obstacle(idx, obstacles)
-                    else:
-                        print(f"  Invalid index. Use 1-{len(obstacles)}")
-                except ValueError:
-                    print("  Invalid format. Use 'E1', 'E2', etc.")
-            elif choice.startswith("r") and len(choice) > 1:
-                try:
-                    idx = int(choice[1:].strip()) - 1
-                    if 0 <= idx < len(obstacles):
-                        removed = obstacles.pop(idx)
-                        SatelliteConfig.set_obstacles(obstacles)
-                        rx, ry = removed[0], removed[1]
-                        print(f"  Removed obstacle at ({rx:.2f}, {ry:.2f})")
-                    else:
-                        print(f"  Invalid index. Use 1-{len(obstacles)}")
-                except ValueError:
-                    print("  Invalid format. Use 'R1', 'R2', etc.")
-            else:
-                print("  Unknown command. Use A/E#/R#/C/D")
-
     def _obstacle_edit_menu_with_state(self, mission_state) -> None:
         """Interactive menu to edit/remove obstacles using MissionState (v2.0.0)."""
         while True:
@@ -339,17 +291,6 @@ class MissionCLI:
             else:
                 print("  Unknown command. Use A/E#/R#/C/D")
 
-    def _add_single_obstacle(self) -> None:
-        """Add a single obstacle interactively (legacy mode)."""
-        try:
-            obs_x = float(input("  X position (meters): "))
-            obs_y = float(input("  Y position (meters): "))
-            obs_r_input = input("  Radius (meters, default 0.3): ").strip()
-            obs_r = float(obs_r_input) if obs_r_input else 0.3
-            SatelliteConfig.add_obstacle(obs_x, obs_y, obs_r)
-        except ValueError:
-            print("  Invalid input, obstacle not added.")
-
     def _add_single_obstacle_to_state(self, mission_state) -> None:
         """Add a single obstacle interactively using MissionState (v2.0.0)."""
         try:
@@ -361,25 +302,6 @@ class MissionCLI:
             mission_state.obstacles_enabled = True
         except ValueError:
             print("  Invalid input, obstacle not added.")
-
-    def _edit_obstacle(self, idx: int, obstacles: List) -> None:
-        """Edit an existing obstacle (legacy mode)."""
-        old = obstacles[idx]
-        print(f"  Editing obstacle {idx+1}: " f"({old[0]:.2f}, {old[1]:.2f}) r={old[2]:.2f}")
-        try:
-            x_input = input(f"  New X (enter for {old[0]:.2f}): ").strip()
-            y_input = input(f"  New Y (enter for {old[1]:.2f}): ").strip()
-            r_input = input(f"  New radius (enter for {old[2]:.2f}): ").strip()
-
-            new_x = float(x_input) if x_input else old[0]
-            new_y = float(y_input) if y_input else old[1]
-            new_r = float(r_input) if r_input else old[2]
-
-            obstacles[idx] = (new_x, new_y, new_r)
-            SatelliteConfig.set_obstacles(obstacles)
-            print(f"  Updated: ({new_x:.2f}, {new_y:.2f}) r={new_r:.2f}")
-        except ValueError:
-            print("  Invalid input, obstacle unchanged.")
 
     def _edit_obstacle_in_state(self, idx: int, mission_state) -> None:
         """Edit an existing obstacle using MissionState (v2.0.0)."""

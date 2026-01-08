@@ -13,7 +13,7 @@ from rich.console import Console
 from rich.panel import Panel
 
 # Import internal modules (lazy import where possible to speed up help)
-from src.satellite_control.config import SatelliteConfig
+# V4.0.0: SatelliteConfig removed - use SimulationConfig only
 from src.satellite_control.config.presets import (
     ConfigPreset,
     get_preset_description,
@@ -241,7 +241,7 @@ def run(
         )
         
         # Apply duration override directly to simulation if needed
-        # (This avoids mutating global SatelliteConfig.MAX_SIMULATION_TIME)
+        # V4.0.0: No global state mutation
         if duration:
             sim.max_simulation_time = duration
         
@@ -492,8 +492,7 @@ def config(
     Inspect or validate configuration.
     """
     try:
-        # In V3.0.0, this should create a default config or accept a config file
-        # For now, fallback to SatelliteConfig for backward compatibility
+        # V4.0.0: Create default config (no SatelliteConfig fallback)
         from src.satellite_control.config.simulation_config import SimulationConfig
         
         # Try to get from default config first (v3.0.0)
@@ -501,8 +500,10 @@ def config(
             default_config = SimulationConfig.create_default()
             app_config = default_config.app_config
         except Exception:
-            # Backward compatibility fallback
-            app_config = SatelliteConfig.get_app_config()
+            # V4.0.0: Use default config (no SatelliteConfig fallback)
+            from src.satellite_control.config.simulation_config import SimulationConfig
+            default_config = SimulationConfig.create_default()
+            app_config = default_config.app_config
 
         if dump:
             console.print_json(app_config.model_dump_json())

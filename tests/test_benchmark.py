@@ -169,16 +169,13 @@ class TestMPCRegressionDetection:
 
     @pytest.fixture
     def mpc_controller(self):
-        """Create an MPCController instance."""
-        from src.satellite_control.config.satellite_config import (
-            SatelliteConfig,
-            initialize_config,
-        )
+        """Create an MPCController instance (V4.0.0: use SimulationConfig)."""
+        # V4.0.0: Use SimulationConfig instead of SatelliteConfig
+        from src.satellite_control.config.simulation_config import SimulationConfig
         from src.satellite_control.control.mpc_controller import MPCController
 
-        initialize_config()
-        app_config = SatelliteConfig.get_app_config()
-        return MPCController(app_config.physics, app_config.mpc)
+        config = SimulationConfig.create_default()
+        return MPCController(config.app_config.physics, config.app_config.mpc)
 
     def test_mpc_solve_time_within_threshold(self, mpc_controller):
         """

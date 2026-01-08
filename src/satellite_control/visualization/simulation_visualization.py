@@ -131,10 +131,11 @@ class SimulationVisualizationManager:
             self.app_config = controller.simulation_config.app_config
             self.mission_state = controller.simulation_config.mission_state
         else:
-            # Backward compatibility fallback (will be removed in V3.0.0)
-            from src.satellite_control.config import SatelliteConfig
+            # V4.0.0: Create defaults if not provided (no SatelliteConfig fallback)
+            from src.satellite_control.config.simulation_config import SimulationConfig
             from src.satellite_control.config.mission_state import create_mission_state
-            self.app_config = SatelliteConfig.get_app_config()
+            default_config = SimulationConfig.create_default()
+            self.app_config = default_config.app_config
             self.mission_state = create_mission_state()
 
     def sync_from_controller(self):
@@ -307,10 +308,9 @@ class SimulationVisualizationManager:
             obstacles_enabled = self.mission_state.obstacles_enabled
             obstacles = list(self.mission_state.obstacles) if self.mission_state.obstacles else []
         else:
-            # Backward compatibility fallback
-            from src.satellite_control.config import SatelliteConfig
-            obstacles_enabled = getattr(SatelliteConfig, "OBSTACLES_ENABLED", False)
-            obstacles = SatelliteConfig.get_obstacles() if obstacles_enabled else []
+            # V4.0.0: No fallback - if no mission_state, obstacles are empty
+            obstacles_enabled = False
+            obstacles = []
         
         if obstacles_enabled and obstacles:
             for i, (obs_x, obs_y, obs_radius) in enumerate(obstacles, 1):

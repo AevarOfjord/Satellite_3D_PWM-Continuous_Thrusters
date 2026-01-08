@@ -4,7 +4,7 @@ Simulation Test Modes - Launchpad for various simulation scenarios.
 
 import argparse
 
-from src.satellite_control.config import SatelliteConfig
+# V4.0.0: SatelliteConfig removed - use SimulationConfig only
 from src.satellite_control.core.simulation import (
     SatelliteMPCLinearizedSimulation,
 )

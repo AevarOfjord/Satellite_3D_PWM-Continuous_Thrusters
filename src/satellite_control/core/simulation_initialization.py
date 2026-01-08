@@ -20,7 +20,7 @@ from typing import Any, Dict, List, Optional, Tuple
 import numpy as np
 
 # V3.0.0: Import SatelliteConfig only for report generator compatibility (TODO: migrate report generator)
-from src.satellite_control.config import SatelliteConfig
+# V4.0.0: SatelliteConfig removed - use SimulationConfig only
 from src.satellite_control.config.constants import Constants
 from src.satellite_control.config.simulation_config import SimulationConfig
 from src.satellite_control.control.mpc_controller import MPCController
@@ -158,8 +158,17 @@ class SimulationInitializer:
         start_vz: float,
         start_omega: float,
     ) -> None:
-        """Initialize satellite physics object and set initial state."""
-        self.simulation.satellite = SatelliteThrusterTester(use_mujoco_viewer=self.use_mujoco_viewer)
+        """Initialize satellite physics object and set initial state (V4.0.0: app_config required)."""
+        if self.simulation_config is None:
+            raise ValueError(
+                "simulation_config is required (V4.0.0: no SatelliteConfig fallback)"
+            )
+        
+        # V4.0.0: Pass app_config to MuJoCoSatelliteSimulator
+        self.simulation.satellite = SatelliteThrusterTester(
+            use_mujoco_viewer=self.use_mujoco_viewer,
+            app_config=self.simulation_config.app_config,
+        )
         self.simulation.satellite.external_simulation_mode = True
 
         # Set initial state (including velocities)
@@ -275,10 +284,12 @@ class SimulationInitializer:
             filename="physics_data.csv",
         )
 
-        # V3.0.0: TODO - Migrate mission_report_generator.py to accept SimulationConfig
-        # For now, use SatelliteConfig as compatibility layer (report generator expects flat attributes)
-        # The report generator accesses many nested attributes that need to be mapped from SimulationConfig
-        self.simulation.report_generator = create_mission_report_generator(SatelliteConfig)
+        # V4.0.0: Pass simulation_config to report generator
+        # TODO: Migrate mission_report_generator.py to accept SimulationConfig directly
+        # For now, create a compatibility adapter that provides flat attribute interface
+        from src.satellite_control.config.satellite_config import SatelliteConfigAdapter
+        adapter = SatelliteConfigAdapter(self.simulation_config)
+        self.simulation.report_generator = create_mission_report_generator(adapter)
         self.simulation.data_save_path = None
 
     def _initialize_performance_monitoring(self) -> None:
@@ -306,26 +317,24 @@ class SimulationInitializer:
         )
 
     def _initialize_mission_manager(self) -> None:
-        """Initialize mission state manager."""
-        # Use mission_state and app_config from simulation_config if available
-        mission_state = (
-            self.simulation_config.mission_state
-            if self.simulation_config is not None
-            else None
-        )
-        app_config = (
-            self.simulation_config.app_config
-            if self.simulation_config is not None
-            else None
-        )
+        """Initialize mission state manager (V4.0.0: simulation_config required)."""
+        if self.simulation_config is None:
+            raise ValueError(
+                "simulation_config is required (V4.0.0: no SatelliteConfig fallback)"
+            )
+        
+        # V4.0.0: simulation_config is required, so mission_state and app_config are always available
+        mission_state = self.simulation_config.mission_state
+        app_config = self.simulation_config.app_config
+        
         self.simulation.mission_manager = MissionStateManager(
+            mission_state=mission_state,  # V4.0.0: Required
+            app_config=app_config,  # V4.0.0: Required
             position_tolerance=self.simulation.position_tolerance,
             angle_tolerance=self.simulation.angle_tolerance,
             normalize_angle_func=self.simulation.normalize_angle,
             angle_difference_func=self.simulation.angle_difference,
             point_to_line_distance_func=self.simulation.point_to_line_distance,
-            mission_state=mission_state,  # Pass mission_state (preferred)
-            app_config=app_config,  # V3.0.0: Pass app_config for timing parameters
         )
 
     def _initialize_state_validator(self) -> None:

@@ -28,16 +28,17 @@ from matplotlib.lines import Line2D
 
 from typing import Optional
 
-from src.satellite_control.config import SatelliteConfig
+# V4.0.0: SatelliteConfig removed - use AppConfig only
 from src.satellite_control.config.models import AppConfig
+from src.satellite_control.config.simulation_config import SimulationConfig
 
 
 def _get_physics_config(app_config: Optional[AppConfig] = None):
     """
-    Get physics configuration from app_config or fallback to SatelliteConfig.
+    Get physics configuration from app_config (V4.0.0: uses defaults if None).
     
     Args:
-        app_config: Optional AppConfig (v3.0.0)
+        app_config: Optional AppConfig (v4.0.0: uses defaults if None)
     
     Returns:
         Dictionary with physics parameters
@@ -52,26 +53,25 @@ def _get_physics_config(app_config: Optional[AppConfig] = None):
             "thruster_forces": app_config.physics.thruster_forces,
         }
     else:
-        # Backward compatibility fallback
+        # V4.0.0: Use default config if not provided
+        default_config = SimulationConfig.create_default()
+        physics = default_config.app_config.physics
         return {
-            "total_mass": SatelliteConfig.TOTAL_MASS,
-            "moment_of_inertia": SatelliteConfig.MOMENT_OF_INERTIA,
-            "satellite_size": SatelliteConfig.SATELLITE_SIZE,
-            "thruster_positions": SatelliteConfig.THRUSTER_POSITIONS.copy(),
-            "thruster_directions": {
-                k: tuple(v) if isinstance(v, (list, np.ndarray)) else v
-                for k, v in SatelliteConfig.THRUSTER_DIRECTIONS.items()
-            },
-            "thruster_forces": SatelliteConfig.THRUSTER_FORCES.copy(),
+            "total_mass": physics.total_mass,
+            "moment_of_inertia": physics.moment_of_inertia,
+            "satellite_size": physics.satellite_size,
+            "thruster_positions": physics.thruster_positions,
+            "thruster_directions": physics.thruster_directions,
+            "thruster_forces": physics.thruster_forces,
         }
 
 
 def _get_simulation_config(app_config: Optional[AppConfig] = None):
     """
-    Get simulation configuration from app_config or fallback to SatelliteConfig.
+    Get simulation configuration from app_config (V4.0.0: uses defaults if None).
     
     Args:
-        app_config: Optional AppConfig (v3.0.0)
+        app_config: Optional AppConfig (v4.0.0: uses defaults if None)
     
     Returns:
         Dictionary with simulation parameters
@@ -82,19 +82,21 @@ def _get_simulation_config(app_config: Optional[AppConfig] = None):
             "control_dt": app_config.simulation.control_dt,
         }
     else:
-        # Backward compatibility fallback
+        # V4.0.0: Use default config if not provided
+        default_config = SimulationConfig.create_default()
+        sim = default_config.app_config.simulation
         return {
-            "dt": SatelliteConfig.SIMULATION_DT,
-            "control_dt": SatelliteConfig.CONTROL_DT,
+            "dt": sim.dt,
+            "control_dt": sim.control_dt,
         }
 
 
 def _get_mpc_config(app_config: Optional[AppConfig] = None):
     """
-    Get MPC configuration from app_config or fallback to SatelliteConfig.
+    Get MPC configuration from app_config (V4.0.0: uses defaults if None).
     
     Args:
-        app_config: Optional AppConfig (v3.0.0)
+        app_config: Optional AppConfig (v4.0.0: uses defaults if None)
     
     Returns:
         Dictionary with MPC parameters
@@ -105,10 +107,12 @@ def _get_mpc_config(app_config: Optional[AppConfig] = None):
             "mpc_time_limit": app_config.mpc.solver_time_limit,
         }
     else:
-        # Backward compatibility fallback
+        # V4.0.0: Use default config if not provided
+        default_config = SimulationConfig.create_default()
+        mpc = default_config.app_config.mpc
         return {
-            "mpc_dt": SatelliteConfig.CONTROL_DT,
-            "mpc_time_limit": SatelliteConfig.MPC_SOLVER_TIME_LIMIT,
+            "mpc_dt": mpc.dt,
+            "mpc_time_limit": mpc.solver_time_limit,
         }
 
 
