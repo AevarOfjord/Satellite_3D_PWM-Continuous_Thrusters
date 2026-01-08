@@ -25,9 +25,12 @@ import numpy as np
 from mujoco import viewer as mujoco_viewer
 
 from src.satellite_control.config import SatelliteConfig
+from src.satellite_control.config.models import AppConfig, SatellitePhysicalParams, SimulationParams
+
+from .backend import SimulationBackend
 
 
-class MuJoCoSatelliteSimulator:
+class MuJoCoSatelliteSimulator(SimulationBackend):
     """
     MuJoCo-based satellite physics simulator.
 
@@ -39,6 +42,9 @@ class MuJoCoSatelliteSimulator:
         self,
         model_path: str = "models/satellite_3d.xml",
         use_mujoco_viewer: bool = True,
+        simulation_params: Optional[SimulationParams] = None,
+        physics_params: Optional[SatellitePhysicalParams] = None,
+        app_config: Optional[AppConfig] = None,
     ):
         """Initialize MuJoCo simulation.
 
@@ -47,6 +53,9 @@ class MuJoCoSatelliteSimulator:
             use_mujoco_viewer: If True, use MuJoCo's native viewer for
                 visualization. If False, use matplotlib
                 (for headless/testing)
+            simulation_params: Optional SimulationParams for timing (V3.0.0)
+            physics_params: Optional SatellitePhysicalParams for physics (V3.0.0)
+            app_config: Optional AppConfig (preferred, contains both params) (V3.0.0)
         """
         # Load MuJoCo model
         model_full_path = Path(model_path)
@@ -62,15 +71,79 @@ class MuJoCoSatelliteSimulator:
         self.viewer_paused = False
         self.viewer_step_request = False
 
-        # Configuration from SatelliteConfig
-        self.satellite_size = SatelliteConfig.SATELLITE_SIZE
-        self.total_mass = SatelliteConfig.TOTAL_MASS
-        self.moment_of_inertia = SatelliteConfig.MOMENT_OF_INERTIA
-        self.com_offset = np.array(SatelliteConfig.COM_OFFSET)
+        # V3.0.0: Use AppConfig if provided, otherwise fall back to SatelliteConfig
+        if app_config is not None:
+            self._app_config = app_config
+            physics = app_config.physics
+            simulation = app_config.simulation
+        else:
+            # Backward compatibility: create from params or use SatelliteConfig
+            if physics_params is not None:
+                physics = physics_params
+            else:
+                # Fallback to SatelliteConfig
+                from src.satellite_control.config import SatelliteConfig
+                physics = SatellitePhysicalParams(
+                    total_mass=SatelliteConfig.TOTAL_MASS,
+                    moment_of_inertia=SatelliteConfig.MOMENT_OF_INERTIA,
+                    satellite_size=SatelliteConfig.SATELLITE_SIZE,
+                    com_offset=tuple(SatelliteConfig.COM_OFFSET),
+                    thruster_positions=SatelliteConfig.THRUSTER_POSITIONS,
+                    thruster_directions={k: tuple(v) for k, v in SatelliteConfig.THRUSTER_DIRECTIONS.items()},
+                    thruster_forces=SatelliteConfig.THRUSTER_FORCES,
+                    use_realistic_physics=SatelliteConfig.USE_REALISTIC_PHYSICS,
+                    damping_linear=SatelliteConfig.DAMPING_LINEAR,
+                    damping_angular=SatelliteConfig.DAMPING_ANGULAR,
+                )
+            
+            if simulation_params is not None:
+                simulation = simulation_params
+            else:
+                # Fallback to SatelliteConfig
+                from src.satellite_control.config import SatelliteConfig
+                simulation = SimulationParams(
+                    dt=SatelliteConfig.SIMULATION_DT,
+                    max_duration=SatelliteConfig.MAX_SIMULATION_TIME,
+                    headless=False,  # Default
+                    window_width=800,
+                    window_height=600,
+                    use_final_stabilization=SatelliteConfig.USE_FINAL_STABILIZATION_IN_SIMULATION,
+                    control_dt=SatelliteConfig.CONTROL_DT,
+                    target_hold_time=SatelliteConfig.TARGET_HOLD_TIME,
+                    waypoint_final_stabilization_time=SatelliteConfig.WAYPOINT_FINAL_STABILIZATION_TIME,
+                    shape_final_stabilization_time=SatelliteConfig.SHAPE_FINAL_STABILIZATION_TIME,
+                    shape_positioning_stabilization_time=SatelliteConfig.SHAPE_POSITIONING_STABILIZATION_TIME,
+                    default_target_speed=0.1,  # Default
+                )
+            
+            # Create AppConfig for internal use
+            from src.satellite_control.config.models import AppConfig, MPCParams
+            self._app_config = AppConfig(
+                version="3.0.0",
+                physics=physics,
+                mpc=MPCParams.model_validate({}),  # Use defaults
+                simulation=simulation,
+            )
+
+        # Store physics and simulation params for easy access
+        self._physics_params = self._app_config.physics
+        self._simulation_params = self._app_config.simulation
+
+        # Configuration from AppConfig (V3.0.0) or SatelliteConfig (backward compat)
+        self.satellite_size = self._physics_params.satellite_size
+        self.total_mass = self._physics_params.total_mass
+        self.moment_of_inertia = self._physics_params.moment_of_inertia
+        self.com_offset = np.array(self._physics_params.com_offset)
 
         # Thruster configuration
-        self.thrusters = SatelliteConfig.THRUSTER_POSITIONS
-        self.thruster_forces = SatelliteConfig.THRUSTER_FORCES.copy()
+        self.thrusters = self._physics_params.thruster_positions
+        self.thruster_forces = self._physics_params.thruster_forces.copy()
+        self.thruster_directions = self._physics_params.thruster_directions
+
+        # Realistic physics flags
+        self.use_realistic_physics = self._physics_params.use_realistic_physics
+        self.linear_damping_coeff = self._physics_params.damping_linear
+        self.rotational_damping_coeff = self._physics_params.damping_angular
 
         # Active thrusters tracking (same as SatelliteThrusterTester)
         self.active_thrusters: Set[int] = set()
@@ -79,9 +152,9 @@ class MuJoCoSatelliteSimulator:
         self.thruster_levels: Dict[int, float] = {}  # Track thrust level [0.0, 1.0]
 
         # Simulation timing
-        self.dt = SatelliteConfig.SIMULATION_DT
-        self.model.opt.timestep = self.dt  # Override XML timestep
-        self.simulation_time = 0.0
+        self._dt = self._simulation_params.dt
+        self.model.opt.timestep = self._dt  # Override XML timestep
+        self._simulation_time = 0.0
         self.last_time = time.time()
         # Always use external step control
         self.external_simulation_mode = True
@@ -264,6 +337,21 @@ class MuJoCoSatelliteSimulator:
                 self.fig.canvas.manager.set_window_title("MuJoCo Satellite Simulation")
         except AttributeError:
             pass  # Window title not supported on this backend
+
+    @property
+    def dt(self) -> float:
+        """Physics timestep in seconds (SimulationBackend interface)."""
+        return self._dt
+
+    @property
+    def simulation_time(self) -> float:
+        """Current simulation time in seconds (SimulationBackend interface)."""
+        return self._simulation_time
+
+    @simulation_time.setter
+    def simulation_time(self, value: float) -> None:
+        """Set simulation time (SimulationBackend interface)."""
+        self._simulation_time = value
 
     def setup_mujoco_viewer(self):
         """
@@ -490,9 +578,9 @@ class MuJoCoSatelliteSimulator:
             if force_magnitude > 0:
                 # Local pos and dir
                 pos_body = (
-                    np.array(SatelliteConfig.THRUSTER_POSITIONS[thruster_id]) - self.com_offset
+                    np.array(self.thrusters[thruster_id]) - self.com_offset
                 )
-                dir_body = np.array(SatelliteConfig.THRUSTER_DIRECTIONS[thruster_id])
+                dir_body = np.array(self.thruster_directions[thruster_id])
 
                 # Rotate to world frame
                 dir_world = np.zeros(3)
@@ -528,7 +616,7 @@ class MuJoCoSatelliteSimulator:
         level = self.thruster_levels.get(thruster_id, 0.0)
         is_active = level > 0.01 or thruster_id in self.active_thrusters
 
-        if not SatelliteConfig.USE_REALISTIC_PHYSICS:
+        if not self.use_realistic_physics:
             # Binary thrust: either full force or zero
             return nominal_force if is_active else 0.0
 
@@ -538,15 +626,14 @@ class MuJoCoSatelliteSimulator:
             time_since_deactivation = self.simulation_time - deactivation_time
 
             # Phase 1: Valve closing delay - maintains full thrust
-            if time_since_deactivation < SatelliteConfig.THRUSTER_VALVE_DELAY:
+            # V3.0.0: Use physics params (for now, use 0.0 as default - not in AppConfig yet)
+            valve_delay = getattr(SatelliteConfig, "THRUSTER_VALVE_DELAY", 0.0)
+            rampup_time = getattr(SatelliteConfig, "THRUSTER_RAMPUP_TIME", 0.0)
+            if time_since_deactivation < valve_delay:
                 force = nominal_force  # Assumes valve was fully open
             # Phase 2: Ramp-down
-            elif time_since_deactivation < (
-                SatelliteConfig.THRUSTER_VALVE_DELAY + SatelliteConfig.THRUSTER_RAMPUP_TIME
-            ):
-                rampdown_progress = (
-                    time_since_deactivation - SatelliteConfig.THRUSTER_VALVE_DELAY
-                ) / SatelliteConfig.THRUSTER_RAMPUP_TIME
+            elif time_since_deactivation < (valve_delay + rampup_time):
+                rampdown_progress = (time_since_deactivation - valve_delay) / rampup_time
                 force = nominal_force * (1.0 - rampdown_progress)
             else:
                 # Fully off - remove from deactivation tracking
@@ -559,7 +646,9 @@ class MuJoCoSatelliteSimulator:
             # as going from MAX to 0.
 
             # Add noise
-            noise_factor = 1.0 + np.random.normal(0, SatelliteConfig.THRUSTER_FORCE_NOISE_STD)
+            # V3.0.0: Use physics params (for now, use 0.0 as default - not in AppConfig yet)
+            noise_std = getattr(SatelliteConfig, "THRUSTER_FORCE_NOISE_STD", 0.0)
+            noise_factor = 1.0 + np.random.normal(0, noise_std)
             return force * noise_factor
 
         # Handle activation (valve opening + ramp-up)
@@ -571,22 +660,25 @@ class MuJoCoSatelliteSimulator:
         time_since_activation = self.simulation_time - activation_time
 
         # Phase 1: Valve opening delay - no thrust
-        if time_since_activation < SatelliteConfig.THRUSTER_VALVE_DELAY:
+        # V3.0.0: Use physics params (for now, use 0.0 as default - not in AppConfig yet)
+        valve_delay = getattr(SatelliteConfig, "THRUSTER_VALVE_DELAY", 0.0)
+        rampup_time = getattr(SatelliteConfig, "THRUSTER_RAMPUP_TIME", 0.0)
+        if time_since_activation < valve_delay:
             return 0.0
 
         # Phase 2: Ramp-up
-        rampup_end = SatelliteConfig.THRUSTER_VALVE_DELAY + SatelliteConfig.THRUSTER_RAMPUP_TIME
+        rampup_end = valve_delay + rampup_time
         if time_since_activation < rampup_end:
-            rampup_progress = (
-                time_since_activation - SatelliteConfig.THRUSTER_VALVE_DELAY
-            ) / SatelliteConfig.THRUSTER_RAMPUP_TIME
+            rampup_progress = (time_since_activation - valve_delay) / rampup_time
             force = nominal_force * rampup_progress
         else:
             # Phase 3: Full thrust
             force = nominal_force
 
         # Add noise
-        noise_factor = 1.0 + np.random.normal(0, SatelliteConfig.THRUSTER_FORCE_NOISE_STD)
+        # V3.0.0: Use physics params (for now, use 0.0 as default - not in AppConfig yet)
+        noise_std = getattr(SatelliteConfig, "THRUSTER_FORCE_NOISE_STD", 0.0)
+        noise_factor = 1.0 + np.random.normal(0, noise_std)
         return force * noise_factor
 
     def update_physics(self, dt: Optional[float] = None):
@@ -630,23 +722,27 @@ class MuJoCoSatelliteSimulator:
         self.data.xfrc_applied[body_id, 5] = net_t[2]
 
         # Add damping and disturbances
-        if SatelliteConfig.USE_REALISTIC_PHYSICS:
+        if self.use_realistic_physics:
             # Linear damping
-            drag_force = -SatelliteConfig.LINEAR_DAMPING_COEFF * self.velocity
+            drag_force = -self.linear_damping_coeff * self.velocity
             self.data.xfrc_applied[body_id, 0] += drag_force[0]
             self.data.xfrc_applied[body_id, 1] += drag_force[1]
 
             # Rotational damping
-            drag_torque = -SatelliteConfig.ROTATIONAL_DAMPING_COEFF * self.angular_velocity
+            drag_torque = -self.rotational_damping_coeff * self.angular_velocity
             self.data.xfrc_applied[body_id, 5] += drag_torque
 
             # Random disturbances
-            if SatelliteConfig.ENABLE_RANDOM_DISTURBANCES:
-                disturbance_force = np.random.normal(0, SatelliteConfig.DISTURBANCE_FORCE_STD, 2)
+            # V3.0.0: Use physics params (for now, use SatelliteConfig - not in AppConfig yet)
+            enable_disturbances = getattr(SatelliteConfig, "ENABLE_RANDOM_DISTURBANCES", False)
+            if enable_disturbances:
+                disturbance_force_std = getattr(SatelliteConfig, "DISTURBANCE_FORCE_STD", 0.0)
+                disturbance_torque_std = getattr(SatelliteConfig, "DISTURBANCE_TORQUE_STD", 0.0)
+                disturbance_force = np.random.normal(0, disturbance_force_std, 2)
                 self.data.xfrc_applied[body_id, 0] += disturbance_force[0]
                 self.data.xfrc_applied[body_id, 1] += disturbance_force[1]
 
-                disturbance_torque = np.random.normal(0, SatelliteConfig.DISTURBANCE_TORQUE_STD)
+                disturbance_torque = np.random.normal(0, disturbance_torque_std)
                 self.data.xfrc_applied[body_id, 5] += disturbance_torque
 
         # Step MuJoCo simulation
@@ -654,7 +750,7 @@ class MuJoCoSatelliteSimulator:
         for _ in range(num_steps):
             mujoco.mj_step(self.model, self.data)
 
-        self.simulation_time += dt
+        self._simulation_time += dt
 
         # Update visual elements (thruster glow)
         self._update_visuals()
@@ -765,7 +861,7 @@ class MuJoCoSatelliteSimulator:
         self.active_thrusters.clear()
         self.thruster_activation_time.clear()
         self.thruster_deactivation_time.clear()
-        self.simulation_time = 0.0
+        self._simulation_time = 0.0
         self.trajectory.clear()
         mujoco.mj_forward(self.model, self.data)
 

@@ -125,23 +125,17 @@ class SimulationVisualizationManager:
         self.max_simulation_time = None
         self.data_save_path = None
 
-        # Import SatelliteConfig at function level to avoid scope issues
-        from src.satellite_control.config import SatelliteConfig
-        from src.satellite_control.config.mission_state import create_mission_state
-
-        # Get config from controller's simulation_config if available
-        # Otherwise fall back to SatelliteConfig for backward compatibility
-        if hasattr(controller, "simulation_config"):
+        # Get config from controller's simulation_config (v3.0.0)
+        # In V3.0.0, controller should always have simulation_config
+        if hasattr(controller, "simulation_config") and controller.simulation_config:
             self.app_config = controller.simulation_config.app_config
             self.mission_state = controller.simulation_config.mission_state
         else:
-            # Backward compatibility
+            # Backward compatibility fallback (will be removed in V3.0.0)
+            from src.satellite_control.config import SatelliteConfig
+            from src.satellite_control.config.mission_state import create_mission_state
             self.app_config = SatelliteConfig.get_app_config()
             self.mission_state = create_mission_state()
-
-        # Keep SatelliteConfig reference for backward compatibility
-        # (will be removed in future phase)
-        self.SatelliteConfig = SatelliteConfig
 
     def sync_from_controller(self):
         """Sync attributes from controller before each draw operation."""
@@ -306,16 +300,19 @@ class SimulationVisualizationManager:
 
     def _draw_obstacles(self):
         """Draw configured obstacles on the visualization."""
-        # Use mission_state or SatelliteConfig for obstacles
-        # Note: Obstacles not yet in AppConfig, so fall back to SatelliteConfig
-        # TODO: Add obstacles to AppConfig in future refactor
-        obstacles_enabled = (
-            getattr(self.SatelliteConfig, "OBSTACLES_ENABLED", False)
-            if hasattr(self.SatelliteConfig, "OBSTACLES_ENABLED")
-            else False
-        )
-        if obstacles_enabled:
-            obstacles = self.SatelliteConfig.get_obstacles()
+        # Use mission_state for obstacles (v3.0.0)
+        obstacles_enabled = False
+        obstacles = []
+        if self.mission_state:
+            obstacles_enabled = self.mission_state.obstacles_enabled
+            obstacles = list(self.mission_state.obstacles) if self.mission_state.obstacles else []
+        else:
+            # Backward compatibility fallback
+            from src.satellite_control.config import SatelliteConfig
+            obstacles_enabled = getattr(SatelliteConfig, "OBSTACLES_ENABLED", False)
+            obstacles = SatelliteConfig.get_obstacles() if obstacles_enabled else []
+        
+        if obstacles_enabled and obstacles:
             for i, (obs_x, obs_y, obs_radius) in enumerate(obstacles, 1):
                 # Draw obstacle as red circle
                 obstacle_circle = patches.Circle(
@@ -329,11 +326,8 @@ class SimulationVisualizationManager:
                 self.satellite.ax_main.add_patch(obstacle_circle)
 
                 # Draw safety zone as red dashed circle
-                # Note: OBSTACLE_AVOIDANCE_SAFETY_MARGIN not yet in AppConfig
-                # TODO: Add to AppConfig in future refactor
-                safety_margin = getattr(
-                    self.SatelliteConfig, "OBSTACLE_AVOIDANCE_SAFETY_MARGIN", 0.1
-                )
+                # Safety margin: use default 0.1m (v3.0.0: could be added to AppConfig if needed)
+                safety_margin = 0.1
                 safety_radius = obs_radius + safety_margin
                 safety_circle = patches.Circle(
                     (obs_x, obs_y),

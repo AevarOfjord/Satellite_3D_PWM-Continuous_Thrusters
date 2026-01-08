@@ -26,33 +26,93 @@ import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.lines import Line2D
 
+from typing import Optional
+
 from src.satellite_control.config import SatelliteConfig
-
-TOTAL_MASS = SatelliteConfig.TOTAL_MASS
-MOMENT_OF_INERTIA = SatelliteConfig.MOMENT_OF_INERTIA
-
-DT = SatelliteConfig.SIMULATION_DT
-CONTROL_DT = SatelliteConfig.CONTROL_DT
-MPC_DT = SatelliteConfig.CONTROL_DT
-MPC_TIME_LIMIT = SatelliteConfig.MPC_SOLVER_TIME_LIMIT
-
-thruster_positions = SatelliteConfig.THRUSTER_POSITIONS.copy()
-thruster_directions = {
-    k: tuple(v) if isinstance(v, (list, np.ndarray)) else v
-    for k, v in SatelliteConfig.THRUSTER_DIRECTIONS.items()
-}
-
-THRUSTER_CONFIGS = []
-for thruster_id in range(1, 9):
-    config = {
-        "direction": SatelliteConfig.THRUSTER_DIRECTIONS[thruster_id],
-        "pos": np.array(SatelliteConfig.THRUSTER_POSITIONS[thruster_id]),
-        "force": SatelliteConfig.THRUSTER_FORCES[thruster_id],
-    }
-    THRUSTER_CONFIGS.append(config)
+from src.satellite_control.config.models import AppConfig
 
 
-def create_satellite_model():
+def _get_physics_config(app_config: Optional[AppConfig] = None):
+    """
+    Get physics configuration from app_config or fallback to SatelliteConfig.
+    
+    Args:
+        app_config: Optional AppConfig (v3.0.0)
+    
+    Returns:
+        Dictionary with physics parameters
+    """
+    if app_config and app_config.physics:
+        return {
+            "total_mass": app_config.physics.total_mass,
+            "moment_of_inertia": app_config.physics.moment_of_inertia,
+            "satellite_size": app_config.physics.satellite_size,
+            "thruster_positions": app_config.physics.thruster_positions,
+            "thruster_directions": app_config.physics.thruster_directions,
+            "thruster_forces": app_config.physics.thruster_forces,
+        }
+    else:
+        # Backward compatibility fallback
+        return {
+            "total_mass": SatelliteConfig.TOTAL_MASS,
+            "moment_of_inertia": SatelliteConfig.MOMENT_OF_INERTIA,
+            "satellite_size": SatelliteConfig.SATELLITE_SIZE,
+            "thruster_positions": SatelliteConfig.THRUSTER_POSITIONS.copy(),
+            "thruster_directions": {
+                k: tuple(v) if isinstance(v, (list, np.ndarray)) else v
+                for k, v in SatelliteConfig.THRUSTER_DIRECTIONS.items()
+            },
+            "thruster_forces": SatelliteConfig.THRUSTER_FORCES.copy(),
+        }
+
+
+def _get_simulation_config(app_config: Optional[AppConfig] = None):
+    """
+    Get simulation configuration from app_config or fallback to SatelliteConfig.
+    
+    Args:
+        app_config: Optional AppConfig (v3.0.0)
+    
+    Returns:
+        Dictionary with simulation parameters
+    """
+    if app_config and app_config.simulation:
+        return {
+            "dt": app_config.simulation.dt,
+            "control_dt": app_config.simulation.control_dt,
+        }
+    else:
+        # Backward compatibility fallback
+        return {
+            "dt": SatelliteConfig.SIMULATION_DT,
+            "control_dt": SatelliteConfig.CONTROL_DT,
+        }
+
+
+def _get_mpc_config(app_config: Optional[AppConfig] = None):
+    """
+    Get MPC configuration from app_config or fallback to SatelliteConfig.
+    
+    Args:
+        app_config: Optional AppConfig (v3.0.0)
+    
+    Returns:
+        Dictionary with MPC parameters
+    """
+    if app_config and app_config.mpc:
+        return {
+            "mpc_dt": app_config.mpc.dt,
+            "mpc_time_limit": app_config.mpc.solver_time_limit,
+        }
+    else:
+        # Backward compatibility fallback
+        return {
+            "mpc_dt": SatelliteConfig.CONTROL_DT,
+            "mpc_time_limit": SatelliteConfig.MPC_SOLVER_TIME_LIMIT,
+        }
+
+
+def create_satellite_model(app_config: Optional[AppConfig] = None):
     """
     Generate a 2D visualization of the satellite test platform.
 
@@ -60,18 +120,21 @@ def create_satellite_model():
     air bearing system, and center of mass calculations. The visualization
     uses scaling and color coding for components.
 
+    Args:
+        app_config: Optional AppConfig for accessing physics parameters (v3.0.0)
+
     Returns:
         tuple: matplotlib figure and axis objects for further customization
     """
 
+    # Get physics configuration
+    physics = _get_physics_config(app_config)
+    satellite_size = physics["satellite_size"]
+    thrusters = physics["thruster_positions"]
+    thruster_forces = physics["thruster_forces"]
+
     # Create figure and axis
     fig, ax = plt.subplots(1, 1, figsize=(12, 10))
-
-    satellite_size = SatelliteConfig.SATELLITE_SIZE
-
-    thrusters = SatelliteConfig.THRUSTER_POSITIONS
-
-    thruster_forces = SatelliteConfig.THRUSTER_FORCES
 
     satellite_rect = patches.Rectangle(
         (-satellite_size / 2, -satellite_size / 2),
@@ -272,11 +335,16 @@ def create_satellite_model():
     return fig, ax
 
 
-def print_thruster_info():
-    """Print detailed thruster information"""
-    thrusters = SatelliteConfig.THRUSTER_POSITIONS
-
-    thruster_forces = SatelliteConfig.THRUSTER_FORCES
+def print_thruster_info(app_config: Optional[AppConfig] = None):
+    """
+    Print detailed thruster information.
+    
+    Args:
+        app_config: Optional AppConfig for accessing physics parameters (v3.0.0)
+    """
+    physics = _get_physics_config(app_config)
+    thrusters = physics["thruster_positions"]
+    thruster_forces = physics["thruster_forces"]
     thrust_values = list(thruster_forces.values())
     thrust_min = min(thrust_values)
     thrust_max = max(thrust_values)

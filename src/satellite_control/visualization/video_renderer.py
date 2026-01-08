@@ -23,6 +23,8 @@ from matplotlib.patches import Circle
 from mpl_toolkits.mplot3d.art3d import Poly3DCollection
 
 from src.satellite_control.config import SatelliteConfig
+from src.satellite_control.config.mission_state import MissionState
+from src.satellite_control.config.models import AppConfig
 from src.satellite_control.visualization.unified_visualizer import PlotStyle
 
 # Worker process cache for parallel frame rendering
@@ -55,6 +57,8 @@ class VideoRenderer:
         dxf_center: Optional[List] = None,
         overlay_dxf: bool = False,
         frame_title_template: str = "Frame {frame}",
+        app_config: Optional[AppConfig] = None,
+        mission_state: Optional[MissionState] = None,
     ):
         """
         Initialize video renderer.
@@ -76,6 +80,8 @@ class VideoRenderer:
             dxf_center: DXF center point
             overlay_dxf: Whether to overlay DXF shape
             frame_title_template: Template for frame titles
+            app_config: Optional AppConfig for accessing configuration (v3.0.0)
+            mission_state: Optional MissionState for accessing mission-specific data (v3.0.0)
         """
         self.data_accessor = data_accessor
         self.dt = dt
@@ -93,6 +99,10 @@ class VideoRenderer:
         self.dxf_center = dxf_center
         self.overlay_dxf = overlay_dxf
         self.frame_title_template = frame_title_template
+
+        # Store config references (v3.0.0)
+        self.app_config = app_config
+        self.mission_state = mission_state
 
         self.fig: Optional[Figure] = None
         self.ax_main: Optional[Axes] = None
@@ -306,21 +316,24 @@ class VideoRenderer:
                 label="Trajectory",
             )
 
-    def draw_obstacles(self, mission_state=None) -> None:
+    def draw_obstacles(self, mission_state: Optional[MissionState] = None) -> None:
         """Draw obstacles if they are configured.
         
         Args:
-            mission_state: Optional MissionState to get obstacles from (v2.0.0).
+            mission_state: Optional MissionState to get obstacles from (v3.0.0).
+                          If None, uses self.mission_state if available, otherwise falls back to SatelliteConfig.
         """
         assert self.ax_main is not None, "ax_main must be initialized"
 
-        # Get obstacles from mission_state if available, otherwise SatelliteConfig
+        # Get obstacles from mission_state parameter, instance mission_state, or SatelliteConfig fallback
         obstacles_enabled = False
         obstacles = []
-        if mission_state:
-            obstacles_enabled = mission_state.obstacles_enabled
-            obstacles = mission_state.obstacles
+        state_to_use = mission_state or self.mission_state
+        if state_to_use:
+            obstacles_enabled = state_to_use.obstacles_enabled
+            obstacles = list(state_to_use.obstacles) if state_to_use.obstacles else []
         else:
+            # Backward compatibility fallback
             obstacles_enabled = getattr(SatelliteConfig, "OBSTACLES_ENABLED", False)
             obstacles = SatelliteConfig.get_obstacles() if obstacles_enabled else []
         
@@ -590,14 +603,25 @@ class VideoRenderer:
             "dxf_base_shape": self.dxf_base_shape,
             "dxf_offset_path": self.dxf_offset_path,
             "dxf_center": self.dxf_center,
-            "dxf_mode_active": getattr(SatelliteConfig, "DXF_SHAPE_MODE_ACTIVE", False),
+            "dxf_mode_active": (
+                self.mission_state.dxf_shape_mode_active
+                if self.mission_state and hasattr(self.mission_state, "dxf_shape_mode_active")
+                else getattr(SatelliteConfig, "DXF_SHAPE_MODE_ACTIVE", False)
+            ),
             "overlay_dxf": self.overlay_dxf,
-            "obstacles_enabled": getattr(SatelliteConfig, "OBSTACLES_ENABLED", False),  # Backward compat
+            "obstacles_enabled": (
+                self.mission_state.obstacles_enabled
+                if self.mission_state
+                else getattr(SatelliteConfig, "OBSTACLES_ENABLED", False)
+            ),
             "obstacles_list": (
-                SatelliteConfig.get_obstacles()
-                if getattr(SatelliteConfig, "OBSTACLES_ENABLED", False)
-                else []
-            ),  # Backward compat - TODO: Get from mission_state if available
+                list(self.mission_state.obstacles) if self.mission_state and self.mission_state.obstacles
+                else (
+                    SatelliteConfig.get_obstacles()
+                    if getattr(SatelliteConfig, "OBSTACLES_ENABLED", False)
+                    else []
+                )
+            ),
             "data_directory": str(getattr(self.data_accessor, "data_directory", Path("."))),
         }
 
@@ -753,11 +777,16 @@ class VideoRenderer:
                     frame_title_template=config["frame_title_template"],
                 )
 
-                # Set config state
-                SatelliteConfig.DXF_SHAPE_MODE_ACTIVE = config["dxf_mode_active"]
-                SatelliteConfig.OBSTACLES_ENABLED = config["obstacles_enabled"]
-                if config["obstacles_enabled"] and config.get("obstacles_list"):
-                    SatelliteConfig.set_obstacles(config["obstacles_list"])
+                # Config state is passed via config dict, no need to mutate SatelliteConfig
+                # (v3.0.0: Worker process uses config dict values directly)
+                # Backward compatibility: Set SatelliteConfig if it exists (for legacy code)
+                try:
+                    SatelliteConfig.DXF_SHAPE_MODE_ACTIVE = config["dxf_mode_active"]
+                    SatelliteConfig.OBSTACLES_ENABLED = config["obstacles_enabled"]
+                    if config["obstacles_enabled"] and config.get("obstacles_list"):
+                        SatelliteConfig.set_obstacles(config["obstacles_list"])
+                except Exception:
+                    pass  # SatelliteConfig may not be available in v3.0.0
 
                 renderer.setup_plot()
                 _worker_gen_cache = renderer

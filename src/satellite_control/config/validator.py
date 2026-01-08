@@ -275,14 +275,25 @@ class ConfigValidator:
             raise ValueError(error_msg)
 
 
-def validate_config_at_startup() -> None:
+def validate_config_at_startup(app_config: Optional[AppConfig] = None) -> None:
     """
     Validate configuration at application startup.
     
     Should be called early in application initialization.
     Raises ValueError if configuration is invalid.
+    
+    Args:
+        app_config: Optional AppConfig to validate (v3.0.0). If None, falls back to SatelliteConfig.
     """
-    from src.satellite_control.config import SatelliteConfig
-
-    app_config = SatelliteConfig.get_app_config()
+    if app_config is None:
+        # Backward compatibility fallback
+        from src.satellite_control.config import SatelliteConfig
+        from src.satellite_control.config.simulation_config import SimulationConfig
+        try:
+            app_config = SatelliteConfig.get_app_config()
+        except Exception:
+            # If SatelliteConfig is not available, create a default SimulationConfig
+            default_config = SimulationConfig.create_default()
+            app_config = default_config.app_config
+    
     ConfigValidator.validate_and_raise(app_config)

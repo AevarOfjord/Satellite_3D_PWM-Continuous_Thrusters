@@ -68,9 +68,11 @@ class TestMPCConstraintProperties:
     @settings(max_examples=50)
     def test_position_bounds_symmetric(self, pos_x, pos_y):
         """Position bounds should be symmetric around origin."""
-        from src.satellite_control.config import SatelliteConfig
+        from src.satellite_control.config.simulation_config import SimulationConfig
 
-        bounds = SatelliteConfig.POSITION_BOUNDS
+        # V3.0.0: Use SimulationConfig instead of SatelliteConfig
+        config = SimulationConfig.create_default()
+        bounds = config.app_config.mpc.position_bounds
 
         # If position is within bounds, -position should also be valid
         if abs(pos_x) <= bounds and abs(pos_y) <= bounds:
@@ -83,9 +85,11 @@ class TestMPCConstraintProperties:
     @settings(max_examples=50)
     def test_velocity_limit_positive(self, velocity):
         """Velocity limits should be positive symmetric."""
-        from src.satellite_control.config import SatelliteConfig
+        from src.satellite_control.config.simulation_config import SimulationConfig
 
-        max_v = SatelliteConfig.MAX_VELOCITY
+        # V3.0.0: Use SimulationConfig instead of SatelliteConfig
+        config = SimulationConfig.create_default()
+        max_v = config.app_config.mpc.max_velocity
 
         assert max_v > 0
         # If v is within limit, -v should also be within limit
@@ -108,10 +112,12 @@ class TestThrusterProperties:
     @settings(max_examples=20)
     def test_thruster_direction_is_unit_vector(self, thruster_idx):
         """All thruster directions should be unit vectors."""
-        from src.satellite_control.config import SatelliteConfig
+        from src.satellite_control.config.simulation_config import SimulationConfig
 
+        # V3.0.0: Use SimulationConfig instead of SatelliteConfig
+        config = SimulationConfig.create_default()
         thruster_id = thruster_idx + 1  # 1-indexed
-        direction = SatelliteConfig.THRUSTER_DIRECTIONS[thruster_id]
+        direction = config.app_config.physics.thruster_directions[thruster_id]
 
         magnitude = np.linalg.norm(direction)
         assert abs(magnitude - 1.0) < 1e-6, f"Thruster {thruster_id} not unit vector"

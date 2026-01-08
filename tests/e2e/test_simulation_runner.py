@@ -1,7 +1,7 @@
 import pytest
 
-from src.satellite_control.config import SatelliteConfig
 from src.satellite_control.core.simulation import SatelliteMPCLinearizedSimulation
+from src.satellite_control.config.simulation_config import SimulationConfig
 
 
 @pytest.fixture
@@ -18,12 +18,16 @@ def test_simulation_e2e_pwm_mode(temp_sim_output_dir):
     End-to-End test for PWM MPC simulation.
     Runs for a short duration and verifies output artifacts.
     """
-    # 1. Setup Config
-    app_config = SatelliteConfig.get_app_config()
-
-    # Configure for fast test
-    app_config.simulation.max_duration = 0.5  # Short run (0.5s)
-    app_config.simulation.headless = True  # Headless mode
+    # 1. Setup Config (use SimulationConfig with overrides for fast test)
+    simulation_config = SimulationConfig.create_with_overrides(
+        {
+            "simulation": {
+                "max_duration": 0.5,  # short run
+                "headless": True,
+            }
+        }
+    )
+    app_config = simulation_config.app_config
 
     # Override paths to use temp dir (if possible, or just check standard output)
     # The current system writes to Data/Simulation relative values.
@@ -32,7 +36,10 @@ def test_simulation_e2e_pwm_mode(temp_sim_output_dir):
 
     # 2. Initialize Simulation
     sim = SatelliteMPCLinearizedSimulation(
-        start_pos=(1.0, 1.0), target_pos=(0.0, 0.0), use_mujoco_viewer=False
+        start_pos=(1.0, 1.0, 0.0),
+        target_pos=(0.0, 0.0, 0.0),
+        use_mujoco_viewer=False,
+        simulation_config=simulation_config,
     )
 
     # 3. Run Simulation Loop

@@ -24,13 +24,8 @@ def mock_simulation():
 @pytest.fixture
 def simulation_config():
     """Create a test SimulationConfig."""
-    from src.satellite_control.config import SatelliteConfig
-
-    app_config = SatelliteConfig.get_app_config()
-    from src.satellite_control.config.mission_state import create_mission_state
-
-    mission_state = create_mission_state()
-    return SimulationConfig(app_config=app_config, mission_state=mission_state)
+    # V3.0.0: Use SimulationConfig.create_default() instead of SatelliteConfig
+    return SimulationConfig.create_default()
 
 
 class TestSimulationInitializerInitialization:

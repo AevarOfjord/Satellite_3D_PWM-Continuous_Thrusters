@@ -25,7 +25,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import numpy as np
 
-from src.satellite_control.config import SatelliteConfig, timing
+# V3.0.0: No longer import SatelliteConfig or timing module
 from src.satellite_control.config.simulation_config import SimulationConfig
 from src.satellite_control.mission.mission_cli import MissionCLI
 from src.satellite_control.mission.mission_logic import MissionLogic
@@ -56,10 +56,12 @@ class MissionManager:
         """Run the selected mission type."""
         if mode_choice == "waypoint":
             # Delegate entirely to CLI which has full implementation
-            return self.cli.run_multi_point_mode()
+            # V3.0.0: Always request simulation_config
+            return self.cli.run_multi_point_mode(return_simulation_config=True)
         elif mode_choice == "shape_following":
             if self.cli.confirm_mission("Shape Following"):
-                return self.run_dxf_shape_mode()
+                # V3.0.0: Always request simulation_config
+                return self.run_dxf_shape_mode(return_simulation_config=True)
         return None
 
     def run_dxf_shape_mode(self, return_simulation_config: bool = False) -> Dict[str, Any]:
@@ -78,12 +80,14 @@ class MissionManager:
         print("\n SHAPE FOLLOWING MISSION")
         print("Satellite will follow a moving target along a shape path.")
         print("  Phase 2: Track moving target along the shape path")
-        stab_time = SatelliteConfig.SHAPE_FINAL_STABILIZATION_TIME
+        # V3.0.0: Use app_config instead of SatelliteConfig
+        stab_time = simulation_config.app_config.simulation.shape_final_stabilization_time
         print(f"  Phase 3: Stabilize at completion point ({stab_time:.1f}s)")
 
         print("\nSimulation starting configuration:")
-        default_start_pos = getattr(SatelliteConfig, "DEFAULT_START_POS", (0.0, 0.0, 0.0))
-        default_start_angle = getattr(SatelliteConfig, "DEFAULT_START_ANGLE", (0.0, 0.0, 0.0))
+        # V3.0.0: Use defaults from mission_state or hardcoded defaults
+        default_start_pos = (0.0, 0.0, 0.0)
+        default_start_angle = (0.0, 0.0, 0.0)
         start_pos = self.cli.get_user_position("starting", default_start_pos)
         start_angle = self.cli.get_user_orientation("starting", default_start_angle)
         start_vx, start_vy, start_vz, start_omega = self.cli.get_user_velocities()
@@ -196,23 +200,24 @@ class MissionManager:
         try:
             path_length = self.logic.calculate_path_length(upscaled_path)
             print(f"Path length: {path_length:.2f} m")
-            default_spd = timing.DEFAULT_TARGET_SPEED
+            # V3.0.0: Use app_config instead of timing module
+            default_spd = simulation_config.app_config.simulation.default_target_speed
             target_speed_input = input(
                 f"Target speed (meters/second, default {default_spd}): "
             ).strip()
             target_speed_mps = (
-                float(target_speed_input) if target_speed_input else timing.DEFAULT_TARGET_SPEED
+                float(target_speed_input) if target_speed_input else default_spd
             )
             if target_speed_mps <= 0:
-                spd = timing.DEFAULT_TARGET_SPEED
+                spd = default_spd
                 print(f"Speed must be positive. Using {spd} m/s.")
-                target_speed_mps = timing.DEFAULT_TARGET_SPEED
+                target_speed_mps = default_spd
             elif target_speed_mps > 0.5:
                 print("Maximum speed 0.5 m/s. Using 0.5 m/s.")
                 target_speed_mps = 0.5
         except ValueError:
             print("Invalid input. Using default speed.")
-            target_speed_mps = timing.DEFAULT_TARGET_SPEED
+            target_speed_mps = simulation_config.app_config.simulation.default_target_speed
 
         print(f"Target speed: {target_speed_mps:.2f} m/s")
 
@@ -276,7 +281,7 @@ class MissionManager:
             print("  Phase 3: Stabilize at final shape position (10s)")
         print(f"Mission duration: ~{estimated_duration:.1f}s estimated")
 
-        # Configure obstacles (updates mission_state if v2.0.0, SatelliteConfig if legacy)
+        # Configure obstacles (V3.0.0: always uses mission_state)
         obstacles = self.cli.configure_obstacles(mission_state=mission_state)
 
         # Update MissionState (v2.0.0)
@@ -322,35 +327,9 @@ class MissionManager:
             }
         )
         
-        # Backward compatibility: update SatelliteConfig
-        SatelliteConfig.DEFAULT_START_POS = start_pos
-        SatelliteConfig.DEFAULT_START_ANGLE = start_angle
-
-        SatelliteConfig.DXF_SHAPE_MODE_ACTIVE = True
-        setattr(SatelliteConfig, "DXF_SHAPE_CENTER", shape_center)
-        SatelliteConfig.DXF_BASE_SHAPE = transformed_shape
-        SatelliteConfig.DXF_SHAPE_PATH = upscaled_path
-        SatelliteConfig.DXF_TARGET_SPEED = target_speed_mps
-        SatelliteConfig.DXF_ESTIMATED_DURATION = estimated_duration
-        SatelliteConfig.DXF_MISSION_START_TIME = None
-        SatelliteConfig.DXF_SHAPE_PHASE = "POSITIONING"
-        SatelliteConfig.DXF_PATH_LENGTH = path_length
-        SatelliteConfig.DXF_HAS_RETURN = has_return
-        setattr(SatelliteConfig, "DXF_RETURN_POSITION", return_pos)
-        setattr(SatelliteConfig, "DXF_RETURN_ANGLE", return_angle)
-        
+        # V3.0.0: All state is managed via MissionState, no SatelliteConfig mutations
         if return_simulation_config:
             config["simulation_config"] = simulation_config
-
-        for attr in [
-            "DXF_TRACKING_START_TIME",
-            "DXF_TARGET_START_DISTANCE",
-            "DXF_STABILIZATION_START_TIME",
-            "DXF_FINAL_POSITION",
-            "DXF_RETURN_START_TIME",
-        ]:
-            if hasattr(SatelliteConfig, attr):
-                delattr(SatelliteConfig, attr)
 
         return config
 

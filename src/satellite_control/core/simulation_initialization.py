@@ -19,6 +19,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import numpy as np
 
+# V3.0.0: Import SatelliteConfig only for report generator compatibility (TODO: migrate report generator)
 from src.satellite_control.config import SatelliteConfig
 from src.satellite_control.config.constants import Constants
 from src.satellite_control.config.simulation_config import SimulationConfig
@@ -91,12 +92,10 @@ class SimulationInitializer:
             start_vz: Initial Z velocity
             start_omega: Initial angular velocity
         """
-        # Get app_config from simulation_config (preferred) or fall back to global
-        app_config = (
-            self.simulation_config.app_config
-            if self.simulation_config is not None
-            else SatelliteConfig.get_app_config()
-        )
+        # V3.0.0: Always require simulation_config
+        if self.simulation_config is None:
+            raise ValueError("simulation_config is required (V3.0.0: no SatelliteConfig fallback)")
+        app_config = self.simulation_config.app_config
 
         # Use Constants for default positions (these are not mutable)
         if start_pos is None:
@@ -220,13 +219,12 @@ class SimulationInitializer:
         # Simulates the delay between sending a command and
         # thrusters actually firing
         # Uses Config parameters for realistic physics when enabled
-        # Note: These are not in AppConfig yet, so we fall back to SatelliteConfig
-        # TODO: Add to AppConfig in future refactor
+        # V3.0.0: Use defaults until these are added to SatellitePhysicalParams
+        # TODO: Add thruster_valve_delay and thruster_rampup_time to SatellitePhysicalParams
         if app_config.physics.use_realistic_physics:
-            self.simulation.VALVE_DELAY = SatelliteConfig.THRUSTER_VALVE_DELAY  # 50ms valve open/close delay
-            self.simulation.THRUST_RAMPUP_TIME = (
-                SatelliteConfig.THRUSTER_RAMPUP_TIME
-            )  # 15ms ramp-up after valve opens
+            # Default values: 50ms valve delay, 15ms ramp-up time
+            self.simulation.VALVE_DELAY = 0.05  # 50ms valve open/close delay
+            self.simulation.THRUST_RAMPUP_TIME = 0.015  # 15ms ramp-up after valve opens
         else:
             self.simulation.VALVE_DELAY = 0.0  # Instant response for idealized physics
             self.simulation.THRUST_RAMPUP_TIME = 0.0
@@ -277,6 +275,9 @@ class SimulationInitializer:
             filename="physics_data.csv",
         )
 
+        # V3.0.0: TODO - Migrate mission_report_generator.py to accept SimulationConfig
+        # For now, use SatelliteConfig as compatibility layer (report generator expects flat attributes)
+        # The report generator accesses many nested attributes that need to be mapped from SimulationConfig
         self.simulation.report_generator = create_mission_report_generator(SatelliteConfig)
         self.simulation.data_save_path = None
 
@@ -306,9 +307,14 @@ class SimulationInitializer:
 
     def _initialize_mission_manager(self) -> None:
         """Initialize mission state manager."""
-        # Use mission_state from simulation_config if available
+        # Use mission_state and app_config from simulation_config if available
         mission_state = (
             self.simulation_config.mission_state
+            if self.simulation_config is not None
+            else None
+        )
+        app_config = (
+            self.simulation_config.app_config
             if self.simulation_config is not None
             else None
         )
@@ -319,6 +325,7 @@ class SimulationInitializer:
             angle_difference_func=self.simulation.angle_difference,
             point_to_line_distance_func=self.simulation.point_to_line_distance,
             mission_state=mission_state,  # Pass mission_state (preferred)
+            app_config=app_config,  # V3.0.0: Pass app_config for timing parameters
         )
 
     def _initialize_state_validator(self) -> None:
@@ -380,21 +387,23 @@ class SimulationInitializer:
                 f"WARNING: - Rotational damping: "
                 f"{app_config.physics.damping_angular:.4f} N*m/(rad/s)"
             )
-            # Note: Noise parameters not in AppConfig yet, fall back to SatelliteConfig
-            # TODO: Add to AppConfig in future refactor
+            # V3.0.0: Use defaults until noise parameters are added to SatellitePhysicalParams
+            # TODO: Add position_noise_std and angle_noise_std to SatellitePhysicalParams
+            position_noise_std = 0.0  # Default: no noise
+            angle_noise_std = 0.0  # Default: no noise
             logger.info(
                 f"WARNING: - Position noise: "
-                f"{SatelliteConfig.POSITION_NOISE_STD * 1000:.2f} mm std"
+                f"{position_noise_std * 1000:.2f} mm std"
             )
-            angle_noise_deg = np.degrees(SatelliteConfig.ANGLE_NOISE_STD)
+            angle_noise_deg = np.degrees(angle_noise_std)
             logger.info(f"WARNING: - Angle noise: {angle_noise_deg:.2f}° std")
         else:
             logger.info("INFO: Idealized physics (no delays, noise, or damping)")
 
         # Apply obstacle avoidance based on mode
-        # Note: Obstacles not in AppConfig yet, fall back to SatelliteConfig
-        # TODO: Add to AppConfig in future refactor
-        if SatelliteConfig.OBSTACLES_ENABLED and SatelliteConfig.get_obstacles():
+        # V3.0.0: Get obstacles from mission_state
+        mission_state = self.simulation_config.mission_state
+        if mission_state.obstacles_enabled and mission_state.obstacles:
             logger.info("Obstacle avoidance enabled.")
 
         # Initialize visualization manager

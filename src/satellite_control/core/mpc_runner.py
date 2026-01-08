@@ -13,8 +13,12 @@ from typing import Any, Dict, Optional, Tuple
 
 import numpy as np
 
-from src.satellite_control.config import SatelliteConfig
+from typing import TYPE_CHECKING
+
 from src.satellite_control.control.mpc_controller import MPCController
+
+if TYPE_CHECKING:
+    from src.satellite_control.config.models import AppConfig
 
 logger = logging.getLogger(__name__)
 
@@ -30,7 +34,7 @@ class MPCRunner:
     def __init__(
         self,
         mpc_controller: MPCController,
-        config: SatelliteConfig,
+        config: Optional["AppConfig"] = None,
         state_validator=None,
     ):
         """
@@ -38,11 +42,11 @@ class MPCRunner:
 
         Args:
             mpc_controller: Initialized MPC Controller instance (MPCController)
-            config: Full application configuration
+            config: Optional AppConfig (v3.0.0). Not currently used but kept for future use.
             state_validator: Optional validator for sensor noise
         """
         self.mpc: MPCController = mpc_controller
-        self.config = config
+        self.config = config  # Stored for potential future use
         self.state_validator = state_validator
 
         # Internal state management

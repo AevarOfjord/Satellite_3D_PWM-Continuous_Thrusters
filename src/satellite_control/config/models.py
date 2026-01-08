@@ -302,6 +302,44 @@ class SimulationParams(BaseModel):
         False,
         description="Require final stabilization hold before terminating missions",
     )
+    
+    # Timing parameters (V3.0.0: moved from SatelliteConfig/timing.py)
+    control_dt: float = Field(
+        0.050,
+        gt=0,
+        le=1.0,
+        description="MPC control update interval in seconds (must be >= dt)",
+    )
+    target_hold_time: float = Field(
+        5.0,
+        gt=0,
+        le=300.0,
+        description="Time to hold at intermediate waypoints in seconds",
+    )
+    waypoint_final_stabilization_time: float = Field(
+        10.0,
+        gt=0,
+        le=300.0,
+        description="Final stabilization time for waypoint missions in seconds",
+    )
+    shape_final_stabilization_time: float = Field(
+        15.0,
+        gt=0,
+        le=300.0,
+        description="Final stabilization time for shape following missions in seconds",
+    )
+    shape_positioning_stabilization_time: float = Field(
+        5.0,
+        gt=0,
+        le=300.0,
+        description="Positioning phase stabilization time for shape missions in seconds",
+    )
+    default_target_speed: float = Field(
+        0.1,
+        gt=0,
+        le=1.0,
+        description="Default target speed for shape following missions in m/s",
+    )
 
 
 class AppConfig(BaseModel):
@@ -323,11 +361,16 @@ class AppConfig(BaseModel):
     @model_validator(mode="after")
     def validate_timing_consistency(self) -> "AppConfig":
         """Ensure timing parameters are consistent across subsystems."""
-        # MPC dt should be a multiple of simulation dt
-        ratio = self.mpc.dt / self.simulation.dt
-        if abs(ratio - round(ratio)) > 0.001:
+        # MPC dt should match simulation control_dt
+        if abs(self.mpc.dt - self.simulation.control_dt) > 0.001:
             raise ValueError(
-                f"MPC dt ({self.mpc.dt}s) should be a multiple of "
+                f"MPC dt ({self.mpc.dt}s) should match simulation control_dt "
+                f"({self.simulation.control_dt}s)"
+            )
+        # Control dt should be >= simulation dt
+        if self.simulation.control_dt < self.simulation.dt:
+            raise ValueError(
+                f"Control dt ({self.simulation.control_dt}s) must be >= "
                 f"simulation dt ({self.simulation.dt}s)"
             )
         return self

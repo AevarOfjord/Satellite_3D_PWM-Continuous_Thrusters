@@ -15,6 +15,9 @@ import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.patches import Circle
 
+from typing import Optional
+
+from src.satellite_control.config.models import AppConfig
 from src.satellite_control.visualization.unified_visualizer import PlotStyle
 
 
@@ -31,6 +34,7 @@ class PlotGenerator:
         data_accessor: Any,
         dt: float,
         system_title: str = "Satellite Control System",
+        app_config: Optional[AppConfig] = None,
     ):
         """
         Initialize plot generator.
@@ -39,10 +43,12 @@ class PlotGenerator:
             data_accessor: Object with data access methods (_col, _row, _get_len)
             dt: Simulation timestep in seconds
             system_title: Title for plots
+            app_config: Optional AppConfig for accessing configuration (v3.0.0)
         """
         self.data_accessor = data_accessor
         self.dt = dt
         self.system_title = system_title
+        self.app_config = app_config
     
     def _col(self, name: str) -> np.ndarray:
         """Get column data from data accessor."""
@@ -1009,8 +1015,13 @@ class PlotGenerator:
 
         # Fallback to default
         try:
-            from src.satellite_control.config import SatelliteConfig
-            return len(SatelliteConfig.THRUSTER_POSITIONS)
+            # Get thruster count from app_config if available, otherwise fallback
+            if self.app_config and self.app_config.physics:
+                return len(self.app_config.physics.thruster_positions)
+            else:
+                # Backward compatibility fallback
+                from src.satellite_control.config import SatelliteConfig
+                return len(SatelliteConfig.THRUSTER_POSITIONS)
         except Exception:
             return 12
 

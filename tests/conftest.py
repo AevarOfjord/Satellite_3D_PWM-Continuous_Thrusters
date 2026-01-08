@@ -16,8 +16,8 @@ import pytest
 project_root = Path(__file__).parent.parent
 sys.path.insert(0, str(project_root))
 
-# Import after path setup
-from src.satellite_control.config import SatelliteConfig  # noqa: E402
+# Prefer SimulationConfig for tests (v3.0.0)
+from src.satellite_control.config.simulation_config import SimulationConfig  # noqa: E402
 
 # ============================================================================
 # Configuration Reset Fixture
@@ -27,14 +27,13 @@ from src.satellite_control.config import SatelliteConfig  # noqa: E402
 @pytest.fixture(autouse=True)
 def fresh_config():
     """
-    Reset SatelliteConfig to clean state before AND after each test.
+    Provide a fresh SimulationConfig (preferred in v3.0.0).
 
-    This fixture addresses the mutable class attribute anti-pattern by
-    ensuring tests don't pollute each other's state.
+    This replaces resetting SatelliteConfig and encourages tests to
+    depend on explicit configs.
     """
-    SatelliteConfig.reset()
-    yield SatelliteConfig
-    SatelliteConfig.reset()
+    sim_config = SimulationConfig.create_default()
+    yield sim_config
 
 
 # ============================================================================

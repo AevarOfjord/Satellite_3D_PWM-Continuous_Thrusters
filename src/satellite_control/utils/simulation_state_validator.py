@@ -30,6 +30,8 @@ from typing import Any, Dict, Optional, Tuple
 import numpy as np
 
 from src.satellite_control.config import SatelliteConfig
+from src.satellite_control.config.models import AppConfig
+from src.satellite_control.config import mpc_params
 from src.satellite_control.utils.navigation_utils import (
     angle_difference,
     normalize_angle,
@@ -52,6 +54,7 @@ class SimulationStateValidator:
         position_bounds: Optional[float] = None,
         max_velocity: Optional[float] = None,
         max_angular_velocity: Optional[float] = None,
+        app_config: Optional[AppConfig] = None,
     ):
         """
         Initialize state validator with tolerances and bounds.
@@ -61,30 +64,37 @@ class SimulationStateValidator:
             angle_tolerance: Angle error tolerance in radians
             velocity_tolerance: Velocity error tolerance in m/s
             angular_velocity_tolerance: Angular velocity tolerance in rad/s
-            position_bounds: Maximum position value (default: from Config)
-            max_velocity: Maximum linear velocity (default: from Config)
-            max_angular_velocity: Maximum angular velocity (default: from Config)
+            position_bounds: Maximum position value (default: from app_config or Config)
+            max_velocity: Maximum linear velocity (default: from app_config or Config)
+            max_angular_velocity: Maximum angular velocity (default: from app_config or Config)
+            app_config: Optional AppConfig for accessing MPC parameters (v3.0.0)
         """
         self.position_tolerance = position_tolerance
         self.angle_tolerance = angle_tolerance
         self.velocity_tolerance = velocity_tolerance
         self.angular_velocity_tolerance = angular_velocity_tolerance
+        self.app_config = app_config
 
-        # Load bounds from Config if not provided
-        # Try to get from app_config if available, otherwise use SatelliteConfig
-        # Note: SatelliteConfig is already imported at module level
+        # Load bounds from app_config if available, otherwise from SatelliteConfig
         if position_bounds is None or max_velocity is None or max_angular_velocity is None:
-            # Try to get from global app_config if available
-            try:
-                app_config = SatelliteConfig.get_app_config()
+            if app_config and app_config.mpc:
                 mpc_params_dict = {
                     "position_bounds": app_config.mpc.position_bounds,
                     "max_velocity": app_config.mpc.max_velocity,
                     "max_angular_velocity": app_config.mpc.max_angular_velocity,
                 }
-            except Exception:
-                # Fall back to old method
-                mpc_params_dict = SatelliteConfig.get_mpc_params()
+            else:
+                # Backward compatibility fallback
+                try:
+                    legacy_app_config = SatelliteConfig.get_app_config()
+                    mpc_params_dict = {
+                        "position_bounds": legacy_app_config.mpc.position_bounds,
+                        "max_velocity": legacy_app_config.mpc.max_velocity,
+                        "max_angular_velocity": legacy_app_config.mpc.max_angular_velocity,
+                    }
+                except Exception:
+                    # Final fallback to old method
+                    mpc_params_dict = SatelliteConfig.get_mpc_params()
             
             self.position_bounds = (
                 position_bounds if position_bounds is not None else mpc_params_dict.get("position_bounds", 3.0)
@@ -364,26 +374,36 @@ class SimulationStateValidator:
             Noisy state with measurement errors added
         """
         if use_realistic_physics is None:
-            # Try to get from app_config if available, otherwise use SatelliteConfig
-            # Note: SatelliteConfig is already imported at module level
-            try:
-                app_config = SatelliteConfig.get_app_config()
-                use_realistic_physics = app_config.physics.use_realistic_physics
-            except Exception:
-                use_realistic_physics = SatelliteConfig.USE_REALISTIC_PHYSICS
+            # Get from app_config if available, otherwise use SatelliteConfig
+            if self.app_config and self.app_config.physics:
+                use_realistic_physics = self.app_config.physics.use_realistic_physics
+            else:
+                # Backward compatibility fallback
+                try:
+                    legacy_app_config = SatelliteConfig.get_app_config()
+                    use_realistic_physics = legacy_app_config.physics.use_realistic_physics
+                except Exception:
+                    use_realistic_physics = getattr(SatelliteConfig, "USE_REALISTIC_PHYSICS", False)
 
         if not use_realistic_physics:
             return true_state
 
         noisy_state = true_state.copy()
 
-        # Get noise parameters
-        # Note: Noise parameters not yet in AppConfig, so fall back to SatelliteConfig
-        # TODO: Add noise parameters to AppConfig in future refactor
-        position_noise_std = getattr(SatelliteConfig, "POSITION_NOISE_STD", 0.0)
-        velocity_noise_std = getattr(SatelliteConfig, "VELOCITY_NOISE_STD", 0.0)
-        angle_noise_std = getattr(SatelliteConfig, "ANGLE_NOISE_STD", 0.0)
-        angular_velocity_noise_std = getattr(SatelliteConfig, "ANGULAR_VELOCITY_NOISE_STD", 0.0)
+        # Get noise parameters from app_config if available, otherwise fallback
+        if self.app_config and self.app_config.physics:
+            # Note: Noise parameters not yet in AppConfig, so use defaults
+            # TODO: Add noise parameters to AppConfig in future refactor
+            position_noise_std = 0.0
+            velocity_noise_std = 0.0
+            angle_noise_std = 0.0
+            angular_velocity_noise_std = 0.0
+        else:
+            # Backward compatibility fallback
+            position_noise_std = getattr(SatelliteConfig, "POSITION_NOISE_STD", 0.0)
+            velocity_noise_std = getattr(SatelliteConfig, "VELOCITY_NOISE_STD", 0.0)
+            angle_noise_std = getattr(SatelliteConfig, "ANGLE_NOISE_STD", 0.0)
+            angular_velocity_noise_std = getattr(SatelliteConfig, "ANGULAR_VELOCITY_NOISE_STD", 0.0)
 
         # Position noise (OptiTrack position uncertainty ~0.1-1mm)
         noisy_state[0] += np.random.normal(0, position_noise_std)
@@ -519,12 +539,14 @@ class SimulationStateValidator:
 
 def create_state_validator_from_config(
     config: Optional[Dict[str, Any]] = None,
+    app_config: Optional[AppConfig] = None,
 ) -> SimulationStateValidator:
     """
     Factory function to create state validator from Config.
 
     Args:
         config: Optional configuration dictionary with overrides
+        app_config: Optional AppConfig for accessing MPC parameters (v3.0.0)
 
     Returns:
         Configured SimulationStateValidator instance
@@ -532,28 +554,45 @@ def create_state_validator_from_config(
     if config is None:
         config = {}
 
-    # Get tolerances from Config
-    position_tolerance = config.get("position_tolerance", SatelliteConfig.POSITION_TOLERANCE)
-    angle_tolerance = config.get("angle_tolerance", SatelliteConfig.ANGLE_TOLERANCE)
-    velocity_tolerance = config.get("velocity_tolerance", SatelliteConfig.VELOCITY_TOLERANCE)
-    angular_velocity_tolerance = config.get(
-        "angular_velocity_tolerance",
-        SatelliteConfig.ANGULAR_VELOCITY_TOLERANCE,
-    )
+    # Get tolerances from config dict, app_config, or fallback to constants
+    if app_config and app_config.mpc:
+        # Use constants from mpc_params module (v3.0.0)
+        position_tolerance = config.get("position_tolerance", mpc_params.POSITION_TOLERANCE)
+        angle_tolerance = config.get("angle_tolerance", mpc_params.ANGLE_TOLERANCE)
+        # Note: velocity_tolerance and angular_velocity_tolerance not in MPCParams, use constants
+        velocity_tolerance = config.get("velocity_tolerance", mpc_params.VELOCITY_TOLERANCE)
+        angular_velocity_tolerance = config.get(
+            "angular_velocity_tolerance", mpc_params.ANGULAR_VELOCITY_TOLERANCE
+        )
+    else:
+        # Backward compatibility fallback
+        position_tolerance = config.get("position_tolerance", SatelliteConfig.POSITION_TOLERANCE)
+        angle_tolerance = config.get("angle_tolerance", SatelliteConfig.ANGLE_TOLERANCE)
+        velocity_tolerance = config.get("velocity_tolerance", SatelliteConfig.VELOCITY_TOLERANCE)
+        angular_velocity_tolerance = config.get(
+            "angular_velocity_tolerance",
+            getattr(SatelliteConfig, "ANGULAR_VELOCITY_TOLERANCE", mpc_params.ANGULAR_VELOCITY_TOLERANCE),
+        )
 
-    # Get bounds from MPC params
-    # Try to get from app_config if available, otherwise use SatelliteConfig
-    # Note: SatelliteConfig is already imported at module level
-    try:
-        app_config = SatelliteConfig.get_app_config()
+    # Get bounds from app_config if available, otherwise from SatelliteConfig
+    if app_config and app_config.mpc:
         mpc_params_dict = {
             "position_bounds": app_config.mpc.position_bounds,
             "max_velocity": app_config.mpc.max_velocity,
             "max_angular_velocity": app_config.mpc.max_angular_velocity,
         }
-    except Exception:
-        # Fall back to old method
-        mpc_params_dict = SatelliteConfig.get_mpc_params()
+    else:
+        # Backward compatibility fallback
+        try:
+            legacy_app_config = SatelliteConfig.get_app_config()
+            mpc_params_dict = {
+                "position_bounds": legacy_app_config.mpc.position_bounds,
+                "max_velocity": legacy_app_config.mpc.max_velocity,
+                "max_angular_velocity": legacy_app_config.mpc.max_angular_velocity,
+            }
+        except Exception:
+            # Final fallback to old method
+            mpc_params_dict = SatelliteConfig.get_mpc_params()
     
     position_bounds = config.get("position_bounds", mpc_params_dict.get("position_bounds"))
     max_velocity = config.get("max_velocity", mpc_params_dict.get("max_velocity"))
@@ -569,6 +608,7 @@ def create_state_validator_from_config(
         position_bounds=position_bounds,
         max_velocity=max_velocity,
         max_angular_velocity=max_angular_velocity,
+        app_config=app_config,
     )
 
 

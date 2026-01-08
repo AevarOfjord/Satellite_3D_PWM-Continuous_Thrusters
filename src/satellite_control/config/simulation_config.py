@@ -138,4 +138,11 @@ class SimulationConfig:
             "headless": self.app_config.simulation.headless,
             "window_width": self.app_config.simulation.window_width,
             "window_height": self.app_config.simulation.window_height,
+            "use_final_stabilization": self.app_config.simulation.use_final_stabilization,
+            "control_dt": self.app_config.simulation.control_dt,
+            "target_hold_time": self.app_config.simulation.target_hold_time,
+            "waypoint_final_stabilization_time": self.app_config.simulation.waypoint_final_stabilization_time,
+            "shape_final_stabilization_time": self.app_config.simulation.shape_final_stabilization_time,
+            "shape_positioning_stabilization_time": self.app_config.simulation.shape_positioning_stabilization_time,
+            "default_target_speed": self.app_config.simulation.default_target_speed,
         }

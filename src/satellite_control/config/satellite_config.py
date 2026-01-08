@@ -89,13 +89,20 @@ def _create_default_config() -> AppConfig:
         verbose_mpc=mpc_params.VERBOSE_MPC,
     )
 
-    # Simulation
+    # Simulation (V3.0.0: include all timing parameters)
     sim = SimulationParams(
         dt=0.005,
         max_duration=timing.MAX_SIMULATION_TIME,
         headless=constants.Constants.HEADLESS_MODE,
         window_width=constants.Constants.WINDOW_WIDTH,
         window_height=constants.Constants.WINDOW_HEIGHT,
+        use_final_stabilization=timing.USE_FINAL_STABILIZATION_IN_SIMULATION,
+        control_dt=timing.CONTROL_DT,
+        target_hold_time=timing.TARGET_HOLD_TIME,
+        waypoint_final_stabilization_time=timing.WAYPOINT_FINAL_STABILIZATION_TIME,
+        shape_final_stabilization_time=timing.SHAPE_FINAL_STABILIZATION_TIME,
+        shape_positioning_stabilization_time=timing.SHAPE_POSITIONING_STABILIZATION_TIME,
+        default_target_speed=timing.DEFAULT_TARGET_SPEED,
     )
 
     return AppConfig(physics=phys, mpc=mpc, simulation=sim, input_file_path=None)
@@ -147,7 +154,7 @@ def use_structured_config(config):
         pass
 
 
-def _deprecated_attribute_warning(attr_name: str, alternative: str, version: str = "2.0.0"):
+def _deprecated_attribute_warning(attr_name: str, alternative: str, version: str = "3.0.0"):
     """
     Issue deprecation warning for mutable attribute access.
     
@@ -168,13 +175,20 @@ class SatelliteConfig:
     """
     Backward-compatible facade for satellite configuration.
 
+    ⚠️ **DEPRECATED - WILL BE REMOVED IN V3.0.0** ⚠️
+    
     This class maintains the same interface as the original SatelliteConfig
     while delegating to the new modular configuration system.
 
-    .. deprecated:: 1.0.0
-       Mutable class attributes (ENABLE_WAYPOINT_MODE, WAYPOINT_TARGETS, DXF_SHAPE_MODE_ACTIVE,
-       OBSTACLES_ENABLED, etc.) are deprecated. Use `SimulationConfig` and `MissionState` instead.
-       See docs/CONFIG_MIGRATION_GUIDE.md for migration instructions.
+    **Migration Required:**
+    - All mutable class attributes are deprecated
+    - Use `SimulationConfig` and `MissionState` instead
+    - See `docs/SATELLITE_CONFIG_DEPRECATION.md` for migration guide
+    - See `docs/CONFIG_MIGRATION_GUIDE.md` for detailed instructions
+
+    **Timeline:**
+    - V2.0.0 (Current): Deprecation warnings active
+    - V3.0.0 (Next): Complete removal - code will break if not migrated
 
     Migration Guide:
         Old: SatelliteConfig.ENABLE_WAYPOINT_MODE = True
@@ -313,9 +327,10 @@ class SatelliteConfig:
     # ========================================================================
     # MISSION 1: WAYPOINT NAVIGATION (supports single or multiple waypoints)
     # ========================================================================
-    # DEPRECATED: These mutable class attributes are deprecated.
+    # ⚠️ DEPRECATED - WILL BE REMOVED IN V3.0.0 ⚠️
+    # These mutable class attributes are deprecated.
     # Use MissionState via SimulationConfig.mission_state instead.
-    # Will be removed in v2.0.0. See docs/CONFIG_MIGRATION_GUIDE.md
+    # See docs/SATELLITE_CONFIG_DEPRECATION.md for migration guide.
     ENABLE_WAYPOINT_MODE = False  # type: ignore
     WAYPOINT_TARGETS: List[Tuple[float, float]] = []  # type: ignore
     WAYPOINT_ANGLES: List[Tuple[float, float, float]] = []  # type: ignore
@@ -328,9 +343,10 @@ class SatelliteConfig:
     # MISSION 2: SHAPE FOLLOWING (circles, rectangles, triangles, hexagons,
     # DXF)
     # ========================================================================
-    # DEPRECATED: These mutable class attributes are deprecated.
+    # ⚠️ DEPRECATED - WILL BE REMOVED IN V3.0.0 ⚠️
+    # These mutable class attributes are deprecated.
     # Use MissionState via SimulationConfig.mission_state instead.
-    # Will be removed in v2.0.0. See docs/CONFIG_MIGRATION_GUIDE.md
+    # See docs/SATELLITE_CONFIG_DEPRECATION.md for migration guide.
     # Note: Shape following uses DXF_SHAPE_MODE_ACTIVE and related fields below
     # DXF shape mode
     DXF_SHAPE_MODE_ACTIVE = False  # type: ignore
@@ -363,9 +379,10 @@ class SatelliteConfig:
 
     _obstacle_manager = obstacles.create_obstacle_manager()
 
-    # DEPRECATED: These mutable class attributes are deprecated.
+    # ⚠️ DEPRECATED - WILL BE REMOVED IN V3.0.0 ⚠️
+    # These mutable class attributes are deprecated.
     # Use MissionState via SimulationConfig.mission_state instead.
-    # Will be removed in v2.0.0. See docs/CONFIG_MIGRATION_GUIDE.md
+    # See docs/SATELLITE_CONFIG_DEPRECATION.md for migration guide.
     OBSTACLES_ENABLED = False  # type: ignore
     OBSTACLES: List[Tuple[float, float, float]] = []  # type: ignore
     DEFAULT_OBSTACLE_RADIUS = obstacles.DEFAULT_OBSTACLE_RADIUS
@@ -514,9 +531,10 @@ class SatelliteConfig:
         Enable or disable waypoint navigation mode (single or multiple).
         
         .. deprecated:: 1.0.0
+           ⚠️ **WILL BE REMOVED IN V3.0.0** ⚠️
+           
            Use MissionState.enable_waypoint_mode instead.
-           This method will be removed in v2.0.0.
-           See docs/CONFIG_MIGRATION_GUIDE.md for migration instructions.
+           See docs/SATELLITE_CONFIG_DEPRECATION.md for migration guide.
         """
         _deprecated_attribute_warning(
             "set_waypoint_mode()",
@@ -554,9 +572,10 @@ class SatelliteConfig:
         Set waypoint target points and orientations.
         
         .. deprecated:: 1.0.0
+           ⚠️ **WILL BE REMOVED IN V3.0.0** ⚠️
+           
            Use MissionState.waypoint_targets and MissionState.waypoint_angles instead.
-           This method will be removed in v2.0.0.
-           See docs/CONFIG_MIGRATION_GUIDE.md for migration instructions.
+           See docs/SATELLITE_CONFIG_DEPRECATION.md for migration guide.
         """
         _deprecated_attribute_warning(
             "set_waypoint_targets()",
@@ -667,9 +686,10 @@ class SatelliteConfig:
         Set obstacle list for collision avoidance.
         
         .. deprecated:: 1.0.0
+           ⚠️ **WILL BE REMOVED IN V3.0.0** ⚠️
+           
            Use MissionState.obstacles or ObstacleManager instead.
-           This method will be removed in v2.0.0.
-           See docs/CONFIG_MIGRATION_GUIDE.md for migration instructions.
+           See docs/SATELLITE_CONFIG_DEPRECATION.md for migration guide.
         """
         _deprecated_attribute_warning(
             "set_obstacles()",
@@ -796,8 +816,10 @@ class SatelliteConfig:
         This addresses the mutable class attribute anti-pattern.
         
         .. deprecated:: 1.0.0
+           ⚠️ **WILL BE REMOVED IN V3.0.0** ⚠️
+           
            With SimulationConfig, each simulation has its own state.
-           No reset needed. This method will be removed in v2.0.0.
+           No reset needed. See docs/SATELLITE_CONFIG_DEPRECATION.md for migration guide.
         """
         _deprecated_attribute_warning(
             "reset_mission_state()",

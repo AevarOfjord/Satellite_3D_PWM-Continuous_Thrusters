@@ -10,7 +10,7 @@ from unittest.mock import MagicMock, patch
 import numpy as np
 import pytest
 
-from src.satellite_control.config import SatelliteConfig
+from src.satellite_control.config.simulation_config import SimulationConfig
 from src.satellite_control.core.simulation_loop import SimulationLoop
 
 
@@ -55,6 +55,8 @@ def mock_simulation():
     sim.performance_monitor = MagicMock()
     sim.performance_monitor.record_physics_step = MagicMock()
     sim.performance_monitor.increment_step = MagicMock()
+    # V3.0.0: Add simulation_config to mock
+    sim.simulation_config = SimulationConfig.create_default()
     return sim
 
 
@@ -243,28 +245,19 @@ class TestSimulationLoopTermination:
 
     def test_termination_on_target_reached(self, mock_simulation):
         """Test termination when target is reached and held."""
+        # V3.0.0: Update simulation_config instead of SatelliteConfig
+        mock_simulation.simulation_config.app_config.simulation.use_final_stabilization = False
+        mock_simulation.simulation_config.app_config.simulation.waypoint_final_stabilization_time = 2.0
+        mock_simulation.simulation_config.mission_state.enable_waypoint_mode = False
+        mock_simulation.simulation_config.mission_state.dxf_shape_mode_active = False
+        
         loop = SimulationLoop(mock_simulation)
         mock_simulation.is_running = True
         mock_simulation.check_target_reached = MagicMock(return_value=True)
         mock_simulation.target_reached_time = 5.0
         mock_simulation.simulation_time = 8.0
-        SatelliteConfig.USE_FINAL_STABILIZATION_IN_SIMULATION = False
-        SatelliteConfig.WAYPOINT_FINAL_STABILIZATION_TIME = 2.0
 
-        # Mock the waypoint check to return False (single waypoint mode)
-        with patch.object(
-            SatelliteConfig,
-            "ENABLE_WAYPOINT_MODE",
-            create=True,
-            new_callable=lambda: False,
-        ):
-            with patch.object(
-                SatelliteConfig,
-                "DXF_SHAPE_MODE_ACTIVE",
-                create=True,
-                new_callable=lambda: False,
-            ):
-                result = loop._check_termination_conditions()
+        result = loop._check_termination_conditions()
 
         # Should terminate if stabilization time is met
         # (exact behavior depends on config, but should check conditions)
@@ -290,47 +283,67 @@ class TestSimulationLoopWaypointHandling:
 
     def test_waypoint_advancement(self, mock_simulation):
         """Test that waypoints are advanced correctly."""
+        # V3.0.0: Update simulation_config instead of SatelliteConfig
+        from src.satellite_control.config.mission_state import MissionState
+        from dataclasses import replace
+        
+        mission_state = replace(
+            mock_simulation.simulation_config.mission_state,
+            enable_waypoint_mode=True,
+            current_target_index=0,
+            waypoint_targets=[(1.0, 1.0, 0.0), (2.0, 2.0, 0.0)],
+        )
+        mock_simulation.simulation_config = replace(
+            mock_simulation.simulation_config,
+            mission_state=mission_state,
+        )
+        mock_simulation.simulation_config.app_config.simulation.waypoint_final_stabilization_time = 2.0
+        mock_simulation.simulation_config.app_config.simulation.target_hold_time = 1.0
+        
+        # Mock mission_manager
+        mock_simulation.mission_manager = MagicMock()
+        mock_simulation.mission_manager.advance_to_next_target = MagicMock(return_value=True)
+        mock_simulation.mission_manager.get_current_waypoint_target = MagicMock(
+            return_value=((2.0, 2.0, 0.0), (0.0, 0.0, 0.0))
+        )
+        
         loop = SimulationLoop(mock_simulation)
-
-        # Mock waypoint config
-        SatelliteConfig.ENABLE_WAYPOINT_MODE = True
-        SatelliteConfig.CURRENT_TARGET_INDEX = 0
-        SatelliteConfig.WAYPOINT_TARGETS = [(1.0, 1.0), (2.0, 2.0)]
-        SatelliteConfig.WAYPOINT_FINAL_STABILIZATION_TIME = 2.0
-        SatelliteConfig.TARGET_HOLD_TIME = 1.0
-
         mock_simulation.target_maintenance_time = 1.5
         mock_simulation.target_reached_time = 0.0
         mock_simulation.simulation_time = 1.5
 
-        with patch.object(
-            SatelliteConfig, "advance_to_next_target", return_value=True
-        ) as mock_advance:
-            with patch.object(
-                SatelliteConfig, "get_current_waypoint_target", return_value=((2.0, 2.0), (0.0, 0.0, 0.0))
-            ):
-                result = loop._handle_waypoint_advancement()
+        result = loop._handle_waypoint_advancement()
 
         # Should attempt to advance
         assert isinstance(result, bool)
 
     def test_waypoint_completion(self, mock_simulation):
         """Test that waypoint mission completion is detected."""
+        # V3.0.0: Update simulation_config instead of SatelliteConfig
+        from src.satellite_control.config.mission_state import MissionState
+        from dataclasses import replace
+        
+        mission_state = replace(
+            mock_simulation.simulation_config.mission_state,
+            enable_waypoint_mode=True,
+            current_target_index=1,
+            waypoint_targets=[(1.0, 1.0, 0.0), (2.0, 2.0, 0.0)],
+        )
+        mock_simulation.simulation_config = replace(
+            mock_simulation.simulation_config,
+            mission_state=mission_state,
+        )
+        mock_simulation.simulation_config.app_config.simulation.waypoint_final_stabilization_time = 2.0
+        
+        # Mock mission_manager
+        mock_simulation.mission_manager = MagicMock()
+        mock_simulation.mission_manager.advance_to_next_target = MagicMock(return_value=False)
+        
         loop = SimulationLoop(mock_simulation)
-
-        # Mock final waypoint
-        SatelliteConfig.ENABLE_WAYPOINT_MODE = True
-        SatelliteConfig.CURRENT_TARGET_INDEX = 1
-        SatelliteConfig.WAYPOINT_TARGETS = [(1.0, 1.0), (2.0, 2.0)]
-        SatelliteConfig.WAYPOINT_FINAL_STABILIZATION_TIME = 2.0
-
         mock_simulation.target_maintenance_time = 2.5
         mock_simulation.simulation_time = 5.0
 
-        with patch.object(
-            SatelliteConfig, "advance_to_next_target", return_value=False
-        ):
-            result = loop._handle_waypoint_advancement()
+        result = loop._handle_waypoint_advancement()
 
         # Should detect completion
         assert isinstance(result, bool)

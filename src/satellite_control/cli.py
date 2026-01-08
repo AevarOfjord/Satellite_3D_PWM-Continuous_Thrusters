@@ -263,6 +263,34 @@ def run(
             sim.close()
 
 
+# Interactive subcommand (explicit)
+@app.command()
+def interactive(
+    duration: Optional[float] = typer.Option(
+        None, "--duration", "-d", help="Override max simulation time in seconds"
+    ),
+    no_anim: bool = typer.Option(False, "--no-anim", help="Disable animation (headless mode)"),
+    preset: Optional[str] = typer.Option(
+        None,
+        "--preset",
+        "-p",
+        help=f"Use configuration preset: {', '.join(ConfigPreset.all())}",
+    ),
+):
+    """
+    Run the interactive mission selector and start a simulation.
+    """
+    # Reuse run() logic; headless/classic/auto are off in interactive mode
+    run(
+        auto=False,
+        duration=duration,
+        no_anim=no_anim,
+        headless=False,
+        classic=False,
+        preset=preset,
+    )
+
+
 @app.command()
 def verify(
     full: bool = typer.Option(False, "--full", help="Run full test suite (slow)"),
@@ -289,6 +317,42 @@ def verify(
 
 
 @app.command()
+def bench(
+    marker: str = typer.Option(
+        "benchmark", "--marker", "-k", help="Pytest -k expression (default: benchmark)"
+    ),
+    full: bool = typer.Option(False, "--full", help="Run all benchmarks (may be slow)"),
+):
+    """
+    Run benchmark suite (pytest-benchmark).
+    """
+    import pytest
+
+    console.print("[bold]Running benchmarks...[/bold]")
+    args = ["tests", "--benchmark-only"]
+    if not full:
+        args.extend(["-k", marker])
+
+    ret_code = pytest.main(args)
+    if ret_code == 0:
+        console.print("\n[bold green]Benchmarks completed.[/bold green]")
+    else:
+        console.print("\n[bold red]Benchmarks failed.[/bold red]")
+        raise typer.Exit(code=ret_code)
+
+
+@app.command("list-missions")
+def list_missions():
+    """
+    List available mission types.
+    """
+    console.print("[bold]Available missions:[/bold]")
+    console.print("  - waypoint")
+    console.print("  - shape_following")
+    console.print("[dim]Use: satellite-control interactive[/dim]")
+
+
+@app.command()
 def presets(
     list_all: bool = typer.Option(False, "--list", "-l", help="List all available presets"),
 ):
@@ -311,6 +375,115 @@ def presets(
 
 
 @app.command()
+def export_config(
+    output: str = typer.Option(
+        "config.yaml",
+        "--output",
+        "-o",
+        help="Output file path (.yaml, .yml, or .json)",
+    ),
+    format: str = typer.Option(
+        "auto",
+        "--format",
+        "-f",
+        help="File format: auto, yaml, or json",
+    ),
+):
+    """
+    Export current configuration to file (V3.0.0).
+    
+    Saves the current SimulationConfig to a YAML or JSON file.
+    The file can be loaded later with 'load-config' command.
+    """
+    from src.satellite_control.config.io import ConfigIO
+    from src.satellite_control.config.simulation_config import SimulationConfig
+    
+    try:
+        # Create default config (or could use current simulation config)
+        config = SimulationConfig.create_default()
+        
+        # Save to file
+        ConfigIO.save(config, output, format=format)
+        
+        console.print(f"[green]✓ Configuration exported to {output}[/green]")
+        console.print(f"[dim]Version: {ConfigIO.CURRENT_CONFIG_VERSION}[/dim]")
+        
+    except Exception as e:
+        console.print(f"[bold red]Failed to export config:[/bold red] {e}")
+        raise typer.Exit(code=1)
+
+
+@app.command()
+def load_config(
+    file_path: str = typer.Argument(..., help="Path to config file (.yaml, .yml, or .json)"),
+    migrate: bool = typer.Option(
+        True,
+        "--migrate/--no-migrate",
+        help="Automatically migrate older config versions",
+    ),
+    validate: bool = typer.Option(
+        True,
+        "--validate/--no-validate",
+        help="Validate configuration after loading",
+    ),
+):
+    """
+    Load configuration from file (V3.0.0).
+    
+    Loads a SimulationConfig from a YAML or JSON file.
+    Older config versions will be automatically migrated if --migrate is enabled.
+    """
+    from pathlib import Path
+    from src.satellite_control.config.io import ConfigIO
+    from src.satellite_control.config.simulation_config import SimulationConfig
+    
+    try:
+        config_file = Path(file_path)
+        
+        if not config_file.exists():
+            console.print(f"[bold red]Config file not found: {file_path}[/bold red]")
+            raise typer.Exit(code=1)
+        
+        # Load config
+        config = ConfigIO.load(config_file, migrate=migrate)
+        
+        console.print(f"[green]✓ Configuration loaded from {file_path}[/green]")
+        
+        # Validate if requested
+        if validate:
+            from src.satellite_control.config.validator import ConfigValidator
+            
+            validator = ConfigValidator()
+            issues = validator.validate_all(config.app_config)
+            
+            if issues:
+                console.print("[bold yellow]Configuration validation warnings:[/bold yellow]")
+                for issue in issues:
+                    console.print(f"  [yellow]⚠[/yellow] {issue}")
+            else:
+                console.print("[green]✓ Configuration is valid[/green]")
+        
+        # Show summary
+        console.print("\n[bold]Configuration Summary:[/bold]")
+        console.print(f"  MPC dt: {config.app_config.mpc.dt}s")
+        console.print(f"  Simulation dt: {config.app_config.simulation.dt}s")
+        console.print(f"  Max duration: {config.app_config.simulation.max_duration}s")
+        console.print(f"  Control dt: {config.app_config.simulation.control_dt}s")
+        
+        console.print("\n[dim]To use this config, pass it to SimulationConfig.create_with_overrides()[/dim]")
+        
+    except FileNotFoundError:
+        console.print(f"[bold red]Config file not found: {file_path}[/bold red]")
+        raise typer.Exit(code=1)
+    except Exception as e:
+        console.print(f"[bold red]Failed to load config:[/bold red] {e}")
+        import traceback
+        console.print("[dim]Traceback:[/dim]")
+        console.print(traceback.format_exc())
+        raise typer.Exit(code=1)
+
+
+@app.command()
 def config(
     dump: bool = typer.Option(False, "--dump", help="Dump current effective config"),
     validate: bool = typer.Option(True, "--validate/--no-validate", help="Validate configuration"),
@@ -319,7 +492,17 @@ def config(
     Inspect or validate configuration.
     """
     try:
-        app_config = SatelliteConfig.get_app_config()
+        # In V3.0.0, this should create a default config or accept a config file
+        # For now, fallback to SatelliteConfig for backward compatibility
+        from src.satellite_control.config.simulation_config import SimulationConfig
+        
+        # Try to get from default config first (v3.0.0)
+        try:
+            default_config = SimulationConfig.create_default()
+            app_config = default_config.app_config
+        except Exception:
+            # Backward compatibility fallback
+            app_config = SatelliteConfig.get_app_config()
 
         if dump:
             console.print_json(app_config.model_dump_json())

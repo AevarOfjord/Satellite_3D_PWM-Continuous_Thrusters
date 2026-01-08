@@ -34,6 +34,9 @@ from matplotlib.patches import Circle
 from mpl_toolkits.mplot3d.art3d import Poly3DCollection
 
 from src.satellite_control.config import SatelliteConfig
+from src.satellite_control.config.mission_state import MissionState
+from src.satellite_control.config.models import AppConfig
+from src.satellite_control.config import mpc_params
 from src.satellite_control.visualization.shape_utils import (
     get_demo_shape,
     load_dxf_shape,
@@ -44,10 +47,13 @@ from src.satellite_control.visualization.shape_utils import (
 matplotlib.use("Agg")  # Use non-interactive backend
 
 
-# Configure ffmpeg path with Config-first logic, then safe fallbacks
+# Configure ffmpeg path with safe fallbacks
 try:
-    if getattr(SatelliteConfig, "FFMPEG_PATH", None):
-        plt.rcParams["animation.ffmpeg_path"] = SatelliteConfig.FFMPEG_PATH
+    # Try to get from constants first
+    from src.satellite_control.config.constants import Constants
+    ffmpeg_path = Constants.FFMPEG_PATH
+    if ffmpeg_path and os.path.exists(ffmpeg_path):
+        plt.rcParams["animation.ffmpeg_path"] = ffmpeg_path
     else:
         # If ffmpeg already in PATH, do nothing
         if shutil.which("ffmpeg") is None:
@@ -188,6 +194,8 @@ class UnifiedVisualizationGenerator:
         load_data: bool = True,
         prefer_pandas: bool = True,
         overlay_dxf: bool = False,
+        app_config: Optional[AppConfig] = None,
+        mission_state: Optional[MissionState] = None,
     ):
         """Initialize the visualization generator.
 
@@ -197,6 +205,8 @@ class UnifiedVisualizationGenerator:
             load_data: If True, automatically locate and load the newest CSV
             prefer_pandas: If True, try pandas; otherwise use csv module backend
             overlay_dxf: If True, overlay DXF shape on trajectory (if available)
+            app_config: Optional AppConfig for accessing physical and MPC parameters (v3.0.0)
+            mission_state: Optional MissionState for accessing mission-specific data (v3.0.0)
         """
         self.data_directory = Path(data_directory)
         self.mode = "simulation"
@@ -223,23 +233,43 @@ class UnifiedVisualizationGenerator:
         self.real_time = True  # Enable real-time animation
         self.dt: Optional[float] = None  # Simulation timestep (will be auto-detected)
 
-        # Get satellite size from config
-        # Note: For standalone usage, fall back to SatelliteConfig
-        # When used from simulation, should get from simulation_config
-        self.satellite_size = SatelliteConfig.SATELLITE_SIZE  # TODO: Accept as parameter
+        # Store config references (v3.0.0)
+        self.app_config = app_config
+        self.mission_state = mission_state
+
+        # Get satellite size from app_config if available, otherwise fallback to SatelliteConfig
+        if app_config and app_config.physics:
+            self.satellite_size = app_config.physics.satellite_size
+        else:
+            # Backward compatibility fallback
+            self.satellite_size = SatelliteConfig.SATELLITE_SIZE
+        
         self.satellite_color = "blue"
         self.target_color = "red"
         self.trajectory_color = "cyan"
 
-        self.dxf_base_shape: List[Any] = getattr(SatelliteConfig, "DXF_BASE_SHAPE", [])
-        self.dxf_offset_path = getattr(SatelliteConfig, "DXF_SHAPE_PATH", [])
-        self.dxf_center = getattr(SatelliteConfig, "DXF_SHAPE_CENTER", None)
+        # Get DXF shape data from mission_state if available, otherwise fallback
+        if mission_state:
+            self.dxf_base_shape = list(mission_state.dxf_base_shape) if mission_state.dxf_base_shape else []
+            self.dxf_offset_path = list(mission_state.dxf_shape_path) if mission_state.dxf_shape_path else []
+            self.dxf_center = mission_state.dxf_shape_center if mission_state.dxf_shape_center else None
+        else:
+            # Backward compatibility fallback
+            self.dxf_base_shape = getattr(SatelliteConfig, "DXF_BASE_SHAPE", [])
+            self.dxf_offset_path = getattr(SatelliteConfig, "DXF_SHAPE_PATH", [])
+            self.dxf_center = getattr(SatelliteConfig, "DXF_SHAPE_CENTER", None)
 
+        # Get thruster positions and forces from app_config if available
         self.thrusters = {}
-        for thruster_id, pos in SatelliteConfig.THRUSTER_POSITIONS.items():
-            self.thrusters[thruster_id] = pos
-
-        self.thruster_forces = SatelliteConfig.THRUSTER_FORCES.copy()
+        if app_config and app_config.physics:
+            for thruster_id, pos in app_config.physics.thruster_positions.items():
+                self.thrusters[thruster_id] = pos
+            self.thruster_forces = app_config.physics.thruster_forces.copy()
+        else:
+            # Backward compatibility fallback
+            for thruster_id, pos in SatelliteConfig.THRUSTER_POSITIONS.items():
+                self.thrusters[thruster_id] = pos
+            self.thruster_forces = SatelliteConfig.THRUSTER_FORCES.copy()
 
         # Initialize component generators (lazy initialization)
         self._plot_generator: Optional[Any] = None
@@ -911,21 +941,24 @@ class UnifiedVisualizationGenerator:
         except Exception:
             pass
 
-    def draw_obstacles(self, mission_state=None) -> None:
+    def draw_obstacles(self, mission_state: Optional[MissionState] = None) -> None:
         """Draw obstacles if they are configured.
         
         Args:
-            mission_state: Optional MissionState to get obstacles from (v2.0.0).
+            mission_state: Optional MissionState to get obstacles from (v3.0.0).
+                          If None, uses self.mission_state if available, otherwise falls back to SatelliteConfig.
         """
         assert self.ax_main is not None, "ax_main must be initialized"
 
-        # Get obstacles from mission_state if available, otherwise SatelliteConfig
+        # Get obstacles from mission_state parameter, instance mission_state, or SatelliteConfig fallback
         obstacles_enabled = False
         obstacles = []
-        if mission_state:
-            obstacles_enabled = mission_state.obstacles_enabled
-            obstacles = mission_state.obstacles
+        state_to_use = mission_state or self.mission_state
+        if state_to_use:
+            obstacles_enabled = state_to_use.obstacles_enabled
+            obstacles = list(state_to_use.obstacles) if state_to_use.obstacles else []
         else:
+            # Backward compatibility fallback
             obstacles_enabled = getattr(SatelliteConfig, "OBSTACLES_ENABLED", False)
             obstacles = SatelliteConfig.get_obstacles() if obstacles_enabled else []
         
@@ -1360,7 +1393,12 @@ class UnifiedVisualizationGenerator:
         time = np.arange(self._get_len()) * float(self.dt)
         pos_error = np.sqrt(self._col("Error_X") ** 2 + self._col("Error_Y") ** 2)
 
-        target_threshold = getattr(SatelliteConfig, "POSITION_TOLERANCE", 0.05)
+        # Get position tolerance from app_config or use default
+        if self.app_config and hasattr(self.app_config.mpc, "position_tolerance"):
+            target_threshold = self.app_config.mpc.position_tolerance
+        else:
+            # Use constant from mpc_params or default
+            target_threshold = mpc_params.POSITION_TOLERANCE
 
         ax.plot(
             time,
@@ -1486,7 +1524,12 @@ class UnifiedVisualizationGenerator:
         angle_error = np.abs(np.degrees(self._col("Error_Yaw")))
 
         # Get threshold in degrees (config stored in radians)
-        target_threshold_rad = getattr(SatelliteConfig, "ANGLE_TOLERANCE", np.deg2rad(3))
+        # Get angle tolerance from app_config or use default
+        if self.app_config and hasattr(self.app_config.mpc, "angle_tolerance"):
+            target_threshold_rad = self.app_config.mpc.angle_tolerance
+        else:
+            # Use constant from mpc_params or default
+            target_threshold_rad = mpc_params.ANGLE_TOLERANCE
         target_threshold_deg = np.degrees(target_threshold_rad)
 
         ax.plot(
@@ -1805,7 +1848,11 @@ class UnifiedVisualizationGenerator:
                     return int(sample_vec.size)
 
         try:
-            return len(SatelliteConfig.THRUSTER_POSITIONS)
+            if self.app_config and self.app_config.physics:
+                return len(self.app_config.physics.thruster_positions)
+            else:
+                # Backward compatibility fallback
+                return len(SatelliteConfig.THRUSTER_POSITIONS)
         except Exception:
             return 12
 
@@ -2625,14 +2672,16 @@ class LinearizedVisualizationGenerator(UnifiedVisualizationGenerator):
 # Imported at the top of the file
 
 
-def configure_dxf_overlay_interactive() -> bool:
+def configure_dxf_overlay_interactive() -> Dict[str, Any]:
     """Interactive configuration of DXF shape overlay.
 
     Prompts user for shape selection, center, rotation, and offset,
-    then sets the configuration in SatelliteConfig.
+    then returns the configuration as a dictionary (v3.0.0).
 
     Returns:
-        True if overlay was configured, False if user cancelled
+        Dictionary with keys: 'dxf_shape_mode_active', 'dxf_base_shape', 
+        'dxf_shape_path', 'dxf_shape_center', or empty dict if cancelled.
+        For backward compatibility, also sets SatelliteConfig if it exists.
     """
     print("\n" + "=" * 60)
     print("   DXF SHAPE OVERLAY CONFIGURATION")
@@ -2645,7 +2694,7 @@ def configure_dxf_overlay_interactive() -> bool:
     )
     if response not in ["yes", "y"]:
         print("Skipping DXF overlay.")
-        return False
+        return {}
 
     # Shape selection
     print("\nShape configuration:")
@@ -2745,14 +2794,25 @@ def configure_dxf_overlay_interactive() -> bool:
     offset_path = make_offset_path(transformed_shape, offset_distance)
     print(f" Created offset path with {len(offset_path)} points")
 
-    # Store in SatelliteConfig
-    SatelliteConfig.DXF_SHAPE_MODE_ACTIVE = True
-    SatelliteConfig.DXF_BASE_SHAPE = transformed_shape
-    SatelliteConfig.DXF_SHAPE_PATH = offset_path
-    setattr(SatelliteConfig, "DXF_SHAPE_CENTER", shape_center)
+    # Return configuration dictionary (v3.0.0)
+    config = {
+        "dxf_shape_mode_active": True,
+        "dxf_base_shape": transformed_shape,
+        "dxf_shape_path": offset_path,
+        "dxf_shape_center": shape_center,
+    }
+    
+    # Backward compatibility: also set SatelliteConfig if it exists
+    try:
+        SatelliteConfig.DXF_SHAPE_MODE_ACTIVE = True
+        SatelliteConfig.DXF_BASE_SHAPE = transformed_shape
+        SatelliteConfig.DXF_SHAPE_PATH = offset_path
+        setattr(SatelliteConfig, "DXF_SHAPE_CENTER", shape_center)
+    except Exception:
+        pass  # SatelliteConfig may not be available in v3.0.0
 
     print("\n DXF overlay configured successfully!")
-    return True
+    return config
 
 
 def select_data_file_interactive() -> tuple:

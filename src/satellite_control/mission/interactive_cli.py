@@ -16,7 +16,6 @@ from rich.panel import Panel
 from rich.table import Table
 from rich.text import Text
 
-from src.satellite_control.config import SatelliteConfig
 from src.satellite_control.config.simulation_config import SimulationConfig
 from src.satellite_control.mission.mission_logic import MissionLogic
 
@@ -155,11 +154,7 @@ class InteractiveMissionCLI:
         if result == "custom":
             return None  # Signal to use custom flow
 
-        # Legacy behavior: just configure SatelliteConfig and return dict
-        if not return_simulation_config:
-            return self._get_preset_config(result)
-
-        # v2.0.0 behavior: also build SimulationConfig and MissionState
+        # V3.0.0: Always create SimulationConfig and MissionState
         preset = self._get_preset_config(result)
         if not preset:
             return {}
@@ -278,53 +273,33 @@ class InteractiveMissionCLI:
             or False
         )
 
-    def _apply_preset(self, preset: Dict[str, Any], mission_state=None) -> None:
+    def _apply_preset(self, preset: Dict[str, Any], mission_state) -> None:
         """Apply preset configuration.
         
         Args:
             preset: Preset configuration dictionary
-            mission_state: Optional MissionState to update. If None, uses SatelliteConfig (legacy).
+            mission_state: MissionState to update (required in V3.0.0).
         """
-        obstacles = preset["obstacles"]
+        obstacles = preset.get("obstacles", [])
         
+        # V3.0.0: Always require mission_state (no legacy fallback)
         if mission_state is None:
-            # Legacy mode: update SatelliteConfig
-            SatelliteConfig.clear_obstacles()
-            for x, y, r in obstacles:
-                SatelliteConfig.add_obstacle(x, y, r)
-            SatelliteConfig.OBSTACLES_ENABLED = len(obstacles) > 0
-
-            # Set positions
-            SatelliteConfig.DEFAULT_START_POS = preset["start_pos"]
-            SatelliteConfig.DEFAULT_START_ANGLE = preset["start_angle"]
-
-            targets = preset.get("targets", [])
-            if targets:
-                SatelliteConfig.DEFAULT_TARGET_POS = targets[0][0]
-                SatelliteConfig.DEFAULT_TARGET_ANGLE = targets[0][1]
-
-                # Configure waypoint mode
-                SatelliteConfig.set_multi_point_mode(True)
-                SatelliteConfig.ENABLE_WAYPOINT_MODE = True
-                SatelliteConfig.WAYPOINT_TARGETS = [t[0] for t in targets]
-                SatelliteConfig.WAYPOINT_ANGLES = [t[1] for t in targets]
-                SatelliteConfig.CURRENT_TARGET_INDEX = 0
-                SatelliteConfig.TARGET_STABILIZATION_START_TIME = None
-        else:
-            # v2.0.0 mode: update MissionState
-            mission_state.obstacles = obstacles
-            mission_state.obstacles_enabled = len(obstacles) > 0
-            
-            targets = preset.get("targets", [])
-            # Extract yaw from angles if they're tuples
-            waypoint_angles = [t[1][2] if isinstance(t[1], tuple) and len(t[1]) == 3 else t[1] for t in targets]
-            
-            mission_state.enable_waypoint_mode = True
-            mission_state.enable_multi_point_mode = True
-            mission_state.waypoint_targets = [t[0] for t in targets]
-            mission_state.waypoint_angles = waypoint_angles
-            mission_state.current_target_index = 0
-            mission_state.target_stabilization_start_time = None
+            raise ValueError("mission_state is required (V3.0.0: no SatelliteConfig fallback)")
+        
+        # Update MissionState
+        mission_state.obstacles = obstacles
+        mission_state.obstacles_enabled = len(obstacles) > 0
+        
+        targets = preset.get("targets", [])
+        # Extract yaw from angles if they're tuples
+        waypoint_angles = [t[1][2] if isinstance(t[1], tuple) and len(t[1]) == 3 else t[1] for t in targets]
+        
+        mission_state.enable_waypoint_mode = True
+        mission_state.enable_multi_point_mode = True
+        mission_state.waypoint_targets = [t[0] for t in targets]
+        mission_state.waypoint_angles = waypoint_angles
+        mission_state.current_target_index = 0
+        mission_state.target_stabilization_start_time = None
 
     def get_position_interactive(
         self,
@@ -402,15 +377,19 @@ class InteractiveMissionCLI:
             float(np.radians(float(yaw or yaw_default))),
         )
 
-    def configure_obstacles_interactive(self, mission_state=None) -> Tuple[List[Tuple[float, float, float]], bool]:
+    def configure_obstacles_interactive(self, mission_state) -> Tuple[List[Tuple[float, float, float]], bool]:
         """Configure obstacles with interactive menu.
         
         Args:
-            mission_state: Optional MissionState to update. If None, uses SatelliteConfig (legacy).
+            mission_state: MissionState to update (required in V3.0.0).
             
         Returns:
             Tuple of (obstacles list, obstacles_enabled bool).
         """
+        # V3.0.0: Always require mission_state (no legacy fallback)
+        if mission_state is None:
+            raise ValueError("mission_state is required (V3.0.0: no SatelliteConfig fallback)")
+        
         console.print()
         console.print(Panel("Obstacle Configuration", style="yellow"))
 
@@ -430,43 +409,36 @@ class InteractiveMissionCLI:
         ).ask()
 
         obstacles: List[Tuple[float, float, float]] = []
-        
-        # Backward compatibility: clear SatelliteConfig
-        SatelliteConfig.clear_obstacles()
 
         if result == "central":
             obstacles.append((0.0, 0.0, 0.3))
-            SatelliteConfig.add_obstacle(0.0, 0.0, 0.3)
             console.print("[green]+ Added central obstacle at (0, 0)[/green]")
 
         elif result == "corridor":
             obstacles.extend([(0.0, 0.4, 0.25), (0.0, -0.4, 0.25)])
-            SatelliteConfig.add_obstacle(0.0, 0.4, 0.25)
-            SatelliteConfig.add_obstacle(0.0, -0.4, 0.25)
             console.print("[green]+ Added corridor obstacles[/green]")
 
         elif result == "scattered":
             scattered = [(0.5, 0.5, 0.2), (-0.5, 0.5, 0.2), (0.5, -0.5, 0.2), (-0.5, -0.5, 0.2)]
             obstacles.extend(scattered)
-            for x, y, r in scattered:
-                SatelliteConfig.add_obstacle(x, y, r)
             console.print("[green]+ Added 4 corner obstacles[/green]")
 
         elif result == "custom":
-            obstacles = self._add_custom_obstacles()
+            obstacles = self._add_custom_obstacles(mission_state)
 
         obstacles_enabled = len(obstacles) > 0
-        SatelliteConfig.OBSTACLES_ENABLED = obstacles_enabled
         
-        # Update MissionState if provided (v2.0.0)
-        if mission_state is not None:
-            mission_state.obstacles = obstacles
-            mission_state.obstacles_enabled = obstacles_enabled
+        # Update MissionState
+        mission_state.obstacles = obstacles
+        mission_state.obstacles_enabled = obstacles_enabled
         
         return obstacles, obstacles_enabled
 
-    def _add_custom_obstacles(self) -> List[Tuple[float, float, float]]:
+    def _add_custom_obstacles(self, mission_state) -> List[Tuple[float, float, float]]:
         """Add custom obstacles interactively.
+        
+        Args:
+            mission_state: MissionState to update (required in V3.0.0).
         
         Returns:
             List of obstacles as (x, y, radius) tuples.
@@ -492,14 +464,20 @@ class InteractiveMissionCLI:
 
             r = float(radius or 0.3)
             obstacles.append((pos[0], pos[1], r))
-            # Backward compatibility
-            SatelliteConfig.add_obstacle(pos[0], pos[1], r)
             console.print(f"[green]+ Added obstacle at {pos}[/green]")
+        
+        # V3.0.0: Update mission_state directly
+        mission_state.obstacles = obstacles
+        mission_state.obstacles_enabled = len(obstacles) > 0
         
         return obstacles
 
     def run_custom_waypoint_mission(self) -> Dict[str, Any]:
         """Run custom waypoint mission configuration."""
+        # Create SimulationConfig for v2.0.0 pattern
+        simulation_config = SimulationConfig.create_default()
+        mission_state = simulation_config.mission_state
+        
         console.print()
         console.print(Panel("Custom Waypoint Mission", style="green"))
 
@@ -536,31 +514,31 @@ class InteractiveMissionCLI:
                     break
 
         # Configure obstacles
-        self.configure_obstacles_interactive()
+        self.configure_obstacles_interactive(mission_state)
 
         # Show summary
-        self._show_custom_mission_summary(start_pos, start_angle, waypoints)
+        self._show_custom_mission_summary(start_pos, start_angle, waypoints, mission_state)
 
         if not self._confirm_mission("Custom Waypoint Mission"):
             return {}
 
-        # Apply configuration
-        SatelliteConfig.DEFAULT_START_POS = start_pos
-        SatelliteConfig.DEFAULT_START_ANGLE = start_angle
-        SatelliteConfig.DEFAULT_TARGET_POS = waypoints[0][0]
-        SatelliteConfig.DEFAULT_TARGET_ANGLE = waypoints[0][1]
-
-        SatelliteConfig.set_multi_point_mode(True)
-        SatelliteConfig.ENABLE_WAYPOINT_MODE = True
-        SatelliteConfig.WAYPOINT_TARGETS = [wp[0] for wp in waypoints]
-        SatelliteConfig.WAYPOINT_ANGLES = [wp[1] for wp in waypoints]
-        SatelliteConfig.CURRENT_TARGET_INDEX = 0
+        # Extract yaw from angles for waypoint_angles
+        waypoint_angles = [wp[1][2] if isinstance(wp[1], tuple) and len(wp[1]) == 3 else wp[1] for wp in waypoints]
+        
+        # Update MissionState (V3.0.0)
+        mission_state.enable_waypoint_mode = True
+        mission_state.enable_multi_point_mode = True
+        mission_state.waypoint_targets = [wp[0] for wp in waypoints]
+        mission_state.waypoint_angles = waypoint_angles
+        mission_state.current_target_index = 0
+        mission_state.target_stabilization_start_time = None
 
         return {
             "mission_type": "waypoint_navigation",
             "mode": "multi_point",
             "start_pos": start_pos,
             "start_angle": start_angle,
+            "simulation_config": simulation_config,
         }
 
     def _show_custom_mission_summary(
@@ -568,6 +546,7 @@ class InteractiveMissionCLI:
         start_pos: Tuple[float, float],
         start_angle: Tuple[float, float, float],
         waypoints: List[Tuple[Tuple[float, float], Tuple[float, float, float]]],
+        mission_state,
     ) -> None:
         """Show summary of custom mission configuration."""
         table = Table(title="◇ Mission Summary", style="green")
@@ -590,7 +569,8 @@ class InteractiveMissionCLI:
             else:
                 table.add_row(f"Waypoint {i}", f"({pos[0]:.2f}, {pos[1]:.2f}) @ {a_deg}")
 
-        obstacles = SatelliteConfig.get_obstacles()
+        # V3.0.0: Read from mission_state instead of SatelliteConfig
+        obstacles = mission_state.obstacles if mission_state else []
         if obstacles:
             table.add_row("Obstacles", f"{len(obstacles)} configured")
         else:
@@ -693,8 +673,12 @@ class InteractiveMissionCLI:
         return_pos = start_pos if has_return else None
         return_angle = start_angle if has_return else None
 
+        # Create SimulationConfig for v2.0.0 pattern
+        simulation_config = SimulationConfig.create_default()
+        mission_state = simulation_config.mission_state
+
         # Configure obstacles
-        self.configure_obstacles_interactive()
+        self.configure_obstacles_interactive(mission_state)
 
         # Generate shape and show preview
         if shape_type == "custom_dxf" and hasattr(self, "_custom_dxf_points"):
@@ -760,7 +744,7 @@ class InteractiveMissionCLI:
         if not self._confirm_mission("Shape Following Mission"):
             return {}
 
-        # Apply configuration to SatelliteConfig
+        # Apply configuration to MissionState (V3.0.0)
         self._apply_shape_config(
             start_pos=start_pos,
             start_angle=start_angle,
@@ -774,6 +758,7 @@ class InteractiveMissionCLI:
             has_return=has_return,
             return_pos=return_pos,
             return_angle=return_angle,
+            mission_state=mission_state,
         )
 
         return {
@@ -781,6 +766,7 @@ class InteractiveMissionCLI:
             "start_pos": start_pos,
             "start_angle": start_angle,
             "shape_type": shape_type,
+            "simulation_config": simulation_config,
         }
 
     def _select_shape_type(self) -> Optional[str]:
@@ -942,32 +928,53 @@ class InteractiveMissionCLI:
         has_return: bool,
         return_pos: Optional[Tuple[float, float]],
         return_angle: Optional[Tuple[float, float, float]],
+        mission_state,
     ) -> None:
-        """Apply shape following configuration to SatelliteConfig."""
-        SatelliteConfig.DEFAULT_START_POS = start_pos
-        SatelliteConfig.DEFAULT_START_ANGLE = start_angle
+        """Apply shape following configuration to MissionState.
+        
+        Args:
+            start_pos: Starting position (x, y)
+            start_angle: Starting angle (roll, pitch, yaw)
+            shape_center: Shape center position (x, y)
+            rotation_rad: Shape rotation in radians
+            transformed_shape: Transformed shape points
+            upscaled_path: Upscaled path points
+            target_speed: Target speed in m/s
+            path_length: Path length in meters
+            estimated_duration: Estimated duration in seconds
+            has_return: Whether to return to start
+            return_pos: Return position (x, y) if has_return
+            return_angle: Return angle if has_return
+            mission_state: MissionState to update (required in V3.0.0).
+        """
+        # V3.0.0: Always require mission_state (no legacy fallback)
+        if mission_state is None:
+            raise ValueError("mission_state is required (V3.0.0: no SatelliteConfig fallback)")
+        
+        # Convert 2D to 3D for mission_state (add z=0.0)
+        start_pos_3d = (start_pos[0], start_pos[1], 0.0) if len(start_pos) == 2 else start_pos
+        shape_center_3d = (shape_center[0], shape_center[1], 0.0) if len(shape_center) == 2 else shape_center
+        upscaled_path_3d = [(p[0], p[1], 0.0) if len(p) == 2 else p for p in upscaled_path]
+        transformed_shape_3d = [(p[0], p[1], 0.0) if len(p) == 2 else p for p in transformed_shape]
+        return_pos_3d = (return_pos[0], return_pos[1], 0.0) if return_pos and len(return_pos) == 2 else return_pos
 
-        # Shape following specific config - use setattr for dynamic attributes
-        SatelliteConfig.DXF_SHAPE_MODE_ACTIVE = True
-        setattr(SatelliteConfig, "DXF_SHAPE_CENTER", shape_center)
-        SatelliteConfig.DXF_BASE_SHAPE = transformed_shape
-        SatelliteConfig.DXF_SHAPE_PATH = upscaled_path
-        SatelliteConfig.DXF_TARGET_SPEED = target_speed
-        SatelliteConfig.DXF_ESTIMATED_DURATION = estimated_duration
-        SatelliteConfig.DXF_MISSION_START_TIME = None
-        SatelliteConfig.DXF_SHAPE_PHASE = "POSITIONING"
-        SatelliteConfig.DXF_PATH_LENGTH = path_length
-        SatelliteConfig.DXF_HAS_RETURN = has_return
-        setattr(SatelliteConfig, "DXF_RETURN_POSITION", return_pos)
-        setattr(SatelliteConfig, "DXF_RETURN_ANGLE", return_angle)
+        # Update MissionState
+        mission_state.dxf_shape_mode_active = True
+        mission_state.dxf_shape_center = shape_center_3d
+        mission_state.dxf_base_shape = transformed_shape_3d
+        mission_state.dxf_shape_path = upscaled_path_3d
+        mission_state.dxf_target_speed = target_speed
+        mission_state.dxf_estimated_duration = estimated_duration
+        mission_state.dxf_mission_start_time = None
+        mission_state.dxf_shape_phase = "POSITIONING"
+        mission_state.dxf_path_length = path_length
+        mission_state.dxf_has_return = has_return
+        mission_state.dxf_return_position = return_pos_3d
+        mission_state.dxf_return_angle = return_angle[2] if return_angle and len(return_angle) == 3 else return_angle
 
         # Clear transient state
-        for attr in [
-            "DXF_TRACKING_START_TIME",
-            "DXF_TARGET_START_DISTANCE",
-            "DXF_STABILIZATION_START_TIME",
-            "DXF_FINAL_POSITION",
-            "DXF_RETURN_START_TIME",
-        ]:
-            if hasattr(SatelliteConfig, attr):
-                delattr(SatelliteConfig, attr)
+        mission_state.dxf_tracking_start_time = None
+        mission_state.dxf_target_start_distance = 0.0
+        mission_state.dxf_stabilization_start_time = None
+        mission_state.dxf_final_position = None
+        mission_state.dxf_return_start_time = None

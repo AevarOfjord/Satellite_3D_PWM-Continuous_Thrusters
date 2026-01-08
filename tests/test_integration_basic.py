@@ -13,22 +13,24 @@ class TestConfigModelIntegration:
 
     def test_config_and_model_thruster_counts_match(self):
         """Test that config and model have same number of thrusters."""
-        from src.satellite_control.config import SatelliteConfig
+        from src.satellite_control.config.simulation_config import SimulationConfig
         from src.satellite_control.core import model
 
-        params = SatelliteConfig.get_satellite_params()
-        config_thruster_count = len(params["thruster_forces"])
+        # V3.0.0: Use SimulationConfig instead of SatelliteConfig
+        config = SimulationConfig.create_default()
+        config_thruster_count = len(config.app_config.physics.thruster_forces)
         model_thruster_count = len(model.thruster_positions)
 
         assert config_thruster_count == model_thruster_count == 8
 
     def test_config_and_model_thruster_ids_match(self):
         """Test that thruster IDs are consistent between config and model."""
-        from src.satellite_control.config import SatelliteConfig
+        from src.satellite_control.config.simulation_config import SimulationConfig
         from src.satellite_control.core import model
 
-        params = SatelliteConfig.get_satellite_params()
-        config_ids = set(params["thruster_forces"].keys())
+        # V3.0.0: Use SimulationConfig instead of SatelliteConfig
+        config = SimulationConfig.create_default()
+        config_ids = set(config.app_config.physics.thruster_forces.keys())
         model_position_ids = set(model.thruster_positions.keys())
         model_direction_ids = set(model.thruster_directions.keys())
 
@@ -36,13 +38,14 @@ class TestConfigModelIntegration:
 
     def test_config_thruster_positions_match_model(self):
         """Test that thruster positions in config match model."""
-        from src.satellite_control.config import SatelliteConfig
+        from src.satellite_control.config.simulation_config import SimulationConfig
         from src.satellite_control.core import model
 
-        params = SatelliteConfig.get_satellite_params()
+        # V3.0.0: Use SimulationConfig instead of SatelliteConfig
+        config = SimulationConfig.create_default()
 
         for thruster_id in range(1, 9):
-            config_pos = params["thruster_positions"][thruster_id]
+            config_pos = config.app_config.physics.thruster_positions[thruster_id]
             model_pos = model.thruster_positions[thruster_id]
 
             assert config_pos == model_pos, f"Thruster {thruster_id} position mismatch"
@@ -51,13 +54,14 @@ class TestConfigModelIntegration:
         """Test that thruster directions in config match model."""
         import numpy as np
 
-        from src.satellite_control.config import SatelliteConfig
+        from src.satellite_control.config.simulation_config import SimulationConfig
         from src.satellite_control.core import model
 
-        params = SatelliteConfig.get_satellite_params()
+        # V3.0.0: Use SimulationConfig instead of SatelliteConfig
+        config = SimulationConfig.create_default()
 
         for thruster_id in range(1, 9):
-            config_dir = params["thruster_directions"][thruster_id]
+            config_dir = config.app_config.physics.thruster_directions[thruster_id]
             model_dir = model.thruster_directions[thruster_id]
 
             # Convert both to tuples for comparison (config has arrays, model has tuples)
@@ -73,31 +77,30 @@ class TestSystemInitialization:
 
     def test_can_get_all_config_params(self):
         """Test that all configuration parameters can be retrieved."""
-        from src.satellite_control.config import SatelliteConfig
+        from src.satellite_control.config.simulation_config import SimulationConfig
 
-        sat_params = SatelliteConfig.get_satellite_params()
-        mpc_params = SatelliteConfig.get_mpc_params()
+        # V3.0.0: Use SimulationConfig instead of SatelliteConfig
+        config = SimulationConfig.create_default()
 
-        assert sat_params is not None
-        assert mpc_params is not None
-        assert len(sat_params) > 0
-        assert len(mpc_params) > 0
+        assert config.app_config.physics is not None
+        assert config.app_config.mpc is not None
+        assert config.app_config.simulation is not None
 
     def test_params_are_internally_consistent(self):
         """Test that parameters are consistent with each other."""
-        from src.satellite_control.config import SatelliteConfig
+        from src.satellite_control.config.simulation_config import SimulationConfig
 
-        # sat_params = SatelliteConfig.get_satellite_params()  # Not currently used
-        mpc_params = SatelliteConfig.get_mpc_params()
+        # V3.0.0: Use SimulationConfig instead of SatelliteConfig
+        config = SimulationConfig.create_default()
 
         # MPC timestep should match control DT
-        assert mpc_params["dt"] == SatelliteConfig.CONTROL_DT
+        assert config.app_config.mpc.dt == config.app_config.simulation.control_dt
 
         # Solver time limit should be less than control interval
-        assert mpc_params["solver_time_limit"] < mpc_params["dt"]
+        assert config.app_config.mpc.solver_time_limit < config.app_config.mpc.dt
 
         # Control horizon should not exceed prediction horizon
-        assert mpc_params["control_horizon"] <= mpc_params["prediction_horizon"]
+        assert config.app_config.mpc.control_horizon <= config.app_config.mpc.prediction_horizon
 
 
 @pytest.mark.integration
@@ -109,14 +112,16 @@ class TestPhysicsComputation:
         """Test computing satellite dynamics with one thruster firing."""
         import numpy as np
 
-        from src.satellite_control.config import SatelliteConfig
+        from src.satellite_control.config.simulation_config import SimulationConfig
         from src.satellite_control.core import model
 
-        params = SatelliteConfig.get_satellite_params()
+        # V3.0.0: Use SimulationConfig instead of SatelliteConfig
+        config = SimulationConfig.create_default()
+        physics = config.app_config.physics
 
         # Fire thruster 1
         thruster_id = 1
-        force_magnitude = params["thruster_forces"][thruster_id]
+        force_magnitude = physics.thruster_forces[thruster_id]
         position = model.thruster_positions[thruster_id]
         direction = model.thruster_directions[thruster_id]
 
@@ -128,8 +133,8 @@ class TestPhysicsComputation:
         torque = position[0] * fy - position[1] * fx
 
         # Compute accelerations
-        mass = params["mass"]
-        inertia = params["inertia"]
+        mass = physics.total_mass
+        inertia = physics.moment_of_inertia
 
         ax = fx / mass
         ay = fy / mass
@@ -144,12 +149,14 @@ class TestPhysicsComputation:
         """Test computing dynamics with all thrusters."""
         import numpy as np
 
-        from src.satellite_control.config import SatelliteConfig
+        from src.satellite_control.config.simulation_config import SimulationConfig
         from src.satellite_control.core import model
 
-        params = SatelliteConfig.get_satellite_params()
-        mass = params["mass"]
-        inertia = params["inertia"]
+        # V3.0.0: Use SimulationConfig instead of SatelliteConfig
+        config = SimulationConfig.create_default()
+        physics = config.app_config.physics
+        mass = physics.total_mass
+        inertia = physics.moment_of_inertia
 
         # All thrusters firing
         total_fx = 0
@@ -157,7 +164,7 @@ class TestPhysicsComputation:
         total_torque = 0
 
         for thruster_id in range(1, 9):
-            force_mag = params["thruster_forces"][thruster_id]
+            force_mag = physics.thruster_forces[thruster_id]
             px, py = model.thruster_positions[thruster_id]
             dx, dy = model.thruster_directions[thruster_id]
 

@@ -179,11 +179,11 @@ class MissionCLI:
             return False
         return True
 
-    def configure_obstacles(self, mission_state=None) -> List[Tuple[float, float, float]]:
+    def configure_obstacles(self, mission_state) -> List[Tuple[float, float, float]]:
         """Configure obstacles with preset menu or custom input.
         
         Args:
-            mission_state: Optional MissionState to update. If None, uses SatelliteConfig (legacy).
+            mission_state: MissionState to update (required in V3.0.0).
             
         Returns:
             List of obstacles as (x, y, radius) tuples.
@@ -229,26 +229,17 @@ class MissionCLI:
             # Custom - manual entry
             obstacles = self._configure_obstacles_manual()
 
-        # Backward compatibility: update SatelliteConfig if no mission_state provided
+        # V3.0.0: Always require mission_state (no legacy fallback)
         if mission_state is None:
-            SatelliteConfig.clear_obstacles()
-            for x, y, r in obstacles:
-                SatelliteConfig.add_obstacle(x, y, r)
-            if obstacles:
-                SatelliteConfig.OBSTACLES_ENABLED = True
-                num_obs = len(obstacles)
-                print(f"\nObstacles enabled: {num_obs} obstacle(s) configured.")
-                self._obstacle_edit_menu()
-            else:
-                SatelliteConfig.OBSTACLES_ENABLED = False
-        else:
-            # Update mission_state directly (v2.0.0 pattern)
-            mission_state.obstacles = obstacles
-            mission_state.obstacles_enabled = len(obstacles) > 0
-            if obstacles:
-                num_obs = len(obstacles)
-                print(f"\nObstacles enabled: {num_obs} obstacle(s) configured.")
-                self._obstacle_edit_menu_with_state(mission_state)
+            raise ValueError("mission_state is required (V3.0.0: no SatelliteConfig fallback)")
+        
+        # Update mission_state directly
+        mission_state.obstacles = obstacles
+        mission_state.obstacles_enabled = len(obstacles) > 0
+        if obstacles:
+            num_obs = len(obstacles)
+            print(f"\nObstacles enabled: {num_obs} obstacle(s) configured.")
+            self._obstacle_edit_menu_with_state(mission_state)
         
         return obstacles
 
@@ -434,10 +425,7 @@ class MissionCLI:
 
             add_obs = input("Add another obstacle? (y/n): ").strip().lower()
         
-        # Backward compatibility: update SatelliteConfig
-        for x, y, r in obstacles:
-            SatelliteConfig.add_obstacle(x, y, r)
-        
+        # V3.0.0: Return obstacles list only, caller updates mission_state
         return obstacles
 
     def select_mission_preset(self, return_simulation_config: bool = False) -> Optional[Dict[str, Any]]:
@@ -468,10 +456,6 @@ class MissionCLI:
             obstacles = []
             mission_state.obstacles = []
             mission_state.obstacles_enabled = False
-            
-            # Backward compatibility
-            SatelliteConfig.clear_obstacles()
-            SatelliteConfig.OBSTACLES_ENABLED = False
 
             if not self.confirm_mission("simple demo"):
                 return {}
@@ -505,11 +489,6 @@ class MissionCLI:
             obstacles = [(0.0, 0.0, 0.3)]
             mission_state.obstacles = obstacles
             mission_state.obstacles_enabled = True
-            
-            # Backward compatibility
-            SatelliteConfig.clear_obstacles()
-            SatelliteConfig.add_obstacle(0.0, 0.0, 0.3)
-            SatelliteConfig.OBSTACLES_ENABLED = True
 
             if not self.confirm_mission("obstacle avoidance demo"):
                 return {}
@@ -543,10 +522,6 @@ class MissionCLI:
             obstacles = []
             mission_state.obstacles = []
             mission_state.obstacles_enabled = False
-            
-            # Backward compatibility
-            SatelliteConfig.clear_obstacles()
-            SatelliteConfig.OBSTACLES_ENABLED = False
 
             if not self.confirm_mission("multi-waypoint demo"):
                 return {}
@@ -585,12 +560,6 @@ class MissionCLI:
             obstacles = [(0.0, 0.5, 0.3), (0.0, -0.5, 0.3)]
             mission_state.obstacles = obstacles
             mission_state.obstacles_enabled = True
-            
-            # Backward compatibility
-            SatelliteConfig.clear_obstacles()
-            SatelliteConfig.add_obstacle(0.0, 0.5, 0.3)
-            SatelliteConfig.add_obstacle(0.0, -0.5, 0.3)
-            SatelliteConfig.OBSTACLES_ENABLED = True
 
             if not self.confirm_mission("corridor navigation demo"):
                 return {}
@@ -624,7 +593,7 @@ class MissionCLI:
         start_pos: Tuple[float, float, float],
         start_angle: Tuple[float, float, float],
         targets: List[Tuple[Tuple[float, float, float], Tuple[float, float, float]]],
-        mission_state=None,
+        mission_state,
     ) -> None:
         """Configure waypoint missions.
         
@@ -632,33 +601,23 @@ class MissionCLI:
             start_pos: Starting position (x, y, z)
             start_angle: Starting angle (roll, pitch, yaw)
             targets: List of (position, angle) tuples
-            mission_state: Optional MissionState to update. If None, uses SatelliteConfig (legacy).
+            mission_state: MissionState to update (required in V3.0.0).
         """
         target_positions = [t[0] for t in targets]
         # Extract yaw from angles (3D Euler angles -> single yaw value for waypoints)
         target_angles = [t[1][2] if isinstance(t[1], tuple) and len(t[1]) == 3 else t[1] for t in targets]
 
+        # V3.0.0: Always require mission_state (no legacy fallback)
         if mission_state is None:
-            # Legacy mode: update SatelliteConfig
-            SatelliteConfig.DEFAULT_START_POS = start_pos
-            SatelliteConfig.DEFAULT_START_ANGLE = start_angle
-            SatelliteConfig.DEFAULT_TARGET_POS = target_positions[0]
-            SatelliteConfig.DEFAULT_TARGET_ANGLE = target_angles[0]
-
-            SatelliteConfig.set_multi_point_mode(True)
-            SatelliteConfig.ENABLE_WAYPOINT_MODE = True
-            SatelliteConfig.WAYPOINT_TARGETS = target_positions
-            SatelliteConfig.WAYPOINT_ANGLES = target_angles
-            SatelliteConfig.CURRENT_TARGET_INDEX = 0
-            SatelliteConfig.TARGET_STABILIZATION_START_TIME = None
-        else:
-            # v2.0.0 mode: update MissionState
-            mission_state.enable_waypoint_mode = True
-            mission_state.enable_multi_point_mode = True
-            mission_state.waypoint_targets = target_positions
-            mission_state.waypoint_angles = target_angles
-            mission_state.current_target_index = 0
-            mission_state.target_stabilization_start_time = None
+            raise ValueError("mission_state is required (V3.0.0: no SatelliteConfig fallback)")
+        
+        # Update MissionState
+        mission_state.enable_waypoint_mode = True
+        mission_state.enable_multi_point_mode = True
+        mission_state.waypoint_targets = target_positions
+        mission_state.waypoint_angles = target_angles
+        mission_state.current_target_index = 0
+        mission_state.target_stabilization_start_time = None
 
     def run_multi_point_mode(self, return_simulation_config: bool = False) -> Dict[str, Any]:
         """Run the multi-point waypoint mission workflow.
@@ -719,7 +678,7 @@ class MissionCLI:
             except ValueError:
                 print("Invalid input. Numeric values required.")
 
-        # Configure obstacles (updates mission_state if v2.0.0, SatelliteConfig if legacy)
+        # Configure obstacles (V3.0.0: always uses mission_state)
         obstacles = self.configure_obstacles(mission_state=mission_state)
 
         # Extract yaw from angles for waypoint_angles (single values, not tuples)
@@ -733,18 +692,7 @@ class MissionCLI:
         mission_state.current_target_index = 0
         mission_state.target_stabilization_start_time = None
 
-        # Backward compatibility: update SatelliteConfig
-        SatelliteConfig.DEFAULT_START_POS = start_pos
-        SatelliteConfig.DEFAULT_START_ANGLE = start_angle
-        SatelliteConfig.DEFAULT_TARGET_POS = targets[0]
-        SatelliteConfig.DEFAULT_TARGET_ANGLE = waypoint_angles[0]
-
-        SatelliteConfig.set_multi_point_mode(True)
-        SatelliteConfig.ENABLE_WAYPOINT_MODE = True
-        SatelliteConfig.WAYPOINT_TARGETS = targets
-        SatelliteConfig.WAYPOINT_ANGLES = waypoint_angles
-        SatelliteConfig.CURRENT_TARGET_INDEX = 0
-        SatelliteConfig.TARGET_STABILIZATION_START_TIME = None
+        # V3.0.0: All state is managed via MissionState, no SatelliteConfig mutations
 
         result = {
             "mission_type": "waypoint_navigation",

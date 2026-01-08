@@ -12,18 +12,18 @@ import numpy as np
 import osqp
 import scipy.sparse as sp
 
-from src.satellite_control.config import SatelliteConfig
 from src.satellite_control.config import mpc_params
 from src.satellite_control.config.models import MPCParams, SatellitePhysicalParams
 from src.satellite_control.core.error_handling import with_error_context
 from src.satellite_control.core.exceptions import OptimizationError, SolverTimeoutError
 from src.satellite_control.utils.caching import cached
 
+from .base import Controller
 
 logger = logging.getLogger(__name__)
 
 
-class MPCController:
+class MPCController(Controller):
     """
     Satellite Model Predictive Controller using OSQP (3D).
 
@@ -40,11 +40,15 @@ class MPCController:
         """
         Initialize MPC controller with OSQP and pre-allocate matrices.
         """
-        # Load defaults from global Config if needed
-        if satellite_params is None:
-            satellite_params = SatelliteConfig.get_app_config().physics
-        if mpc_params is None:
-            mpc_params = SatelliteConfig.get_app_config().mpc
+        # Load defaults from SimulationConfig if not provided (V3.0.0)
+        if satellite_params is None or mpc_params is None:
+            from src.satellite_control.config.simulation_config import SimulationConfig
+
+            default_config = SimulationConfig.create_default()
+            if satellite_params is None:
+                satellite_params = default_config.app_config.physics
+            if mpc_params is None:
+                mpc_params = default_config.app_config.mpc
 
         # Normalization Helper
         def get_param(obj, attr, key, default=None):
@@ -73,7 +77,7 @@ class MPCController:
 
         # MPC parameters
         self.N = get_param(mpc_params, "prediction_horizon", "prediction_horizon")
-        self.dt = get_param(mpc_params, "dt", "dt")
+        self._dt = get_param(mpc_params, "dt", "dt")
 
         self.solver_time_limit = get_param(mpc_params, "solver_time_limit", "solver_time_limit")
 
@@ -139,6 +143,16 @@ class MPCController:
 
         if self.verbose:
             print("OSQP MPC Ready.")
+    
+    @property
+    def dt(self) -> float:
+        """Control update interval in seconds (Controller interface)."""
+        return self._dt
+    
+    @property
+    def prediction_horizon(self) -> Optional[int]:
+        """Prediction horizon (Controller interface)."""
+        return self.N
 
     def _precompute_thruster_forces(self) -> None:
         """Precompute thruster forces and torques in body frame (3D)."""
@@ -370,6 +384,21 @@ class MPCController:
                 for idx in indices:
                     self.A.data[idx] = val
 
+    def get_solver_stats(self) -> Dict[str, Any]:
+        """Get solver performance statistics (Controller interface)."""
+        if not self.solve_times:
+            return {
+                "solve_count": 0,
+                "average_solve_time": 0.0,
+                "max_solve_time": 0.0,
+            }
+        return {
+            "solve_times": self.solve_times.copy(),
+            "solve_count": len(self.solve_times),
+            "average_solve_time": sum(self.solve_times) / len(self.solve_times),
+            "max_solve_time": max(self.solve_times),
+        }
+    
     @with_error_context("MPC solve", reraise=True)
     def get_control_action(
         self,

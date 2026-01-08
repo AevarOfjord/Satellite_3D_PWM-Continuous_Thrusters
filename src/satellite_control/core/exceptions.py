@@ -15,7 +15,7 @@ Exception categories:
 See also: error_handling.py for error handling utilities and decorators.
 """
 
-from typing import Any
+from typing import Any, Optional, Union
 
 
 class SatelliteControlException(Exception):
@@ -71,11 +71,30 @@ class OptimizationError(MPCException):
 class SolverTimeoutError(MPCException):
     """Raised when MPC solver exceeds time limit."""
 
-    def __init__(self, time_limit: float, actual_time: float):
-        message = f"Solver timeout: {actual_time:.3f}s exceeded limit of " f"{time_limit:.3f}s"
+    def __init__(self, time_limit: Optional[Union[float, str]] = None, actual_time: Optional[float] = None):
+        """
+        Initialize SolverTimeoutError.
+        
+        Args:
+            time_limit: Time limit in seconds, or a string message (for convenience in tests)
+            actual_time: Actual time in seconds (required if time_limit is a float)
+        """
+        if isinstance(time_limit, str):
+            # Convenience format: single string message (for tests)
+            message = time_limit
+            self.time_limit = 0.0
+            self.actual_time = 0.0
+        elif time_limit is not None and actual_time is not None:
+            # Original format: two floats
+            message = f"Solver timeout: {actual_time:.3f}s exceeded limit of {time_limit:.3f}s"
+            self.time_limit = time_limit
+            self.actual_time = actual_time
+        else:
+            # Default fallback
+            message = "Solver timeout"
+            self.time_limit = 0.0
+            self.actual_time = 0.0
         super().__init__(message)
-        self.time_limit = time_limit
-        self.actual_time = actual_time
 
 
 class InfeasibleProblemError(MPCException):
@@ -190,6 +209,27 @@ class MissionTimeoutError(MissionException):
         super().__init__(message)
         self.elapsed_time = elapsed_time
         self.time_limit = time_limit
+
+
+# ============================================================================
+# Operation / Context Errors
+# ============================================================================
+
+
+class OperationError(SatelliteControlException):
+    """
+    Raised when an operation fails and we want to propagate contextual info.
+
+    This is used by the error handling utilities to wrap arbitrary exceptions
+    with the operation name so callers (and tests) can distinguish contextual
+    failures from other exceptions.
+    """
+
+    def __init__(self, operation: str, original_exc: Exception) -> None:
+        message = f"{operation} failed: {original_exc}"
+        super().__init__(message)
+        self.operation = operation
+        self.original_exc = original_exc
 
 
 # ============================================================================
