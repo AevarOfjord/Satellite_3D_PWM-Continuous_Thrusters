@@ -306,12 +306,25 @@ class VideoRenderer:
                 label="Trajectory",
             )
 
-    def draw_obstacles(self) -> None:
-        """Draw obstacles if they are configured."""
+    def draw_obstacles(self, mission_state=None) -> None:
+        """Draw obstacles if they are configured.
+        
+        Args:
+            mission_state: Optional MissionState to get obstacles from (v2.0.0).
+        """
         assert self.ax_main is not None, "ax_main must be initialized"
 
-        if hasattr(SatelliteConfig, "OBSTACLES_ENABLED") and SatelliteConfig.OBSTACLES_ENABLED:
-            obstacles = SatelliteConfig.get_obstacles()
+        # Get obstacles from mission_state if available, otherwise SatelliteConfig
+        obstacles_enabled = False
+        obstacles = []
+        if mission_state:
+            obstacles_enabled = mission_state.obstacles_enabled
+            obstacles = mission_state.obstacles
+        else:
+            obstacles_enabled = getattr(SatelliteConfig, "OBSTACLES_ENABLED", False)
+            obstacles = SatelliteConfig.get_obstacles() if obstacles_enabled else []
+        
+        if obstacles_enabled and obstacles:
             for i, (obs_x, obs_y, obs_radius) in enumerate(obstacles, 1):
                 # Draw obstacle as red filled circle
                 obstacle_circle = Circle(
@@ -579,12 +592,12 @@ class VideoRenderer:
             "dxf_center": self.dxf_center,
             "dxf_mode_active": getattr(SatelliteConfig, "DXF_SHAPE_MODE_ACTIVE", False),
             "overlay_dxf": self.overlay_dxf,
-            "obstacles_enabled": getattr(SatelliteConfig, "OBSTACLES_ENABLED", False),
+            "obstacles_enabled": getattr(SatelliteConfig, "OBSTACLES_ENABLED", False),  # Backward compat
             "obstacles_list": (
                 SatelliteConfig.get_obstacles()
                 if getattr(SatelliteConfig, "OBSTACLES_ENABLED", False)
                 else []
-            ),
+            ),  # Backward compat - TODO: Get from mission_state if available
             "data_directory": str(getattr(self.data_accessor, "data_directory", Path("."))),
         }
 

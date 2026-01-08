@@ -11,6 +11,7 @@ from typing import Any, Dict, List, Optional, Tuple
 import numpy as np
 
 from src.satellite_control.config import SatelliteConfig
+from src.satellite_control.config.simulation_config import SimulationConfig
 from src.satellite_control.mission.mission_logic import MissionLogic
 
 
@@ -178,9 +179,16 @@ class MissionCLI:
             return False
         return True
 
-    def configure_obstacles(self) -> None:
-        """Configure obstacles with preset menu or custom input."""
-        SatelliteConfig.clear_obstacles()
+    def configure_obstacles(self, mission_state=None) -> List[Tuple[float, float, float]]:
+        """Configure obstacles with preset menu or custom input.
+        
+        Args:
+            mission_state: Optional MissionState to update. If None, uses SatelliteConfig (legacy).
+            
+        Returns:
+            List of obstacles as (x, y, radius) tuples.
+        """
+        obstacles: List[Tuple[float, float, float]] = []
 
         print("\n=== Obstacle Configuration ===")
         print("1. No obstacles")
@@ -193,13 +201,13 @@ class MissionCLI:
 
         if choice == "2":
             # Single central obstacle
-            SatelliteConfig.add_obstacle(0.0, 0.0, 0.3)
+            obstacles.append((0.0, 0.0, 0.3))
             print("  Added: Central obstacle at (0.0, 0.0), r=0.30")
 
         elif choice == "3":
             # Corridor - two obstacles with gap in middle
-            SatelliteConfig.add_obstacle(0.0, 0.4, 0.25)
-            SatelliteConfig.add_obstacle(0.0, -0.4, 0.25)
+            obstacles.append((0.0, 0.4, 0.25))
+            obstacles.append((0.0, -0.4, 0.25))
             print("  Added: Corridor with gap at Y=0")
             print("    Obstacle 1: (0.0, 0.4), r=0.25")
             print("    Obstacle 2: (0.0, -0.4), r=0.25")
@@ -212,31 +220,40 @@ class MissionCLI:
                 (0.5, -0.5, 0.2),
                 (-0.5, -0.5, 0.2),
             ]
-            for x, y, r in positions:
-                SatelliteConfig.add_obstacle(x, y, r)
+            obstacles.extend(positions)
             print("  Added: 4 scattered obstacles at corners")
             for x, y, r in positions:
                 print(f"    ({x:.1f}, {y:.1f}), r={r:.2f}")
 
         elif choice == "5":
             # Custom - manual entry
-            self._configure_obstacles_manual()
+            obstacles = self._configure_obstacles_manual()
 
+        # Backward compatibility: update SatelliteConfig if no mission_state provided
+        if mission_state is None:
+            SatelliteConfig.clear_obstacles()
+            for x, y, r in obstacles:
+                SatelliteConfig.add_obstacle(x, y, r)
+            if obstacles:
+                SatelliteConfig.OBSTACLES_ENABLED = True
+                num_obs = len(obstacles)
+                print(f"\nObstacles enabled: {num_obs} obstacle(s) configured.")
+                self._obstacle_edit_menu()
+            else:
+                SatelliteConfig.OBSTACLES_ENABLED = False
         else:
-            # No obstacles (choice == "1" or invalid)
-            print("  No obstacles configured.")
-
-        if SatelliteConfig.get_obstacles():
-            SatelliteConfig.OBSTACLES_ENABLED = True
-            num_obs = len(SatelliteConfig.get_obstacles())
-            print(f"\nObstacles enabled: {num_obs} obstacle(s) configured.")
-            # Offer edit/modify options
-            self._obstacle_edit_menu()
-        else:
-            SatelliteConfig.OBSTACLES_ENABLED = False
+            # Update mission_state directly (v2.0.0 pattern)
+            mission_state.obstacles = obstacles
+            mission_state.obstacles_enabled = len(obstacles) > 0
+            if obstacles:
+                num_obs = len(obstacles)
+                print(f"\nObstacles enabled: {num_obs} obstacle(s) configured.")
+                self._obstacle_edit_menu_with_state(mission_state)
+        
+        return obstacles
 
     def _obstacle_edit_menu(self) -> None:
-        """Interactive menu to edit/remove obstacles after config."""
+        """Interactive menu to edit/remove obstacles after config (legacy mode)."""
         while True:
             obstacles = SatelliteConfig.get_obstacles()
             if not obstacles:
@@ -283,8 +300,56 @@ class MissionCLI:
             else:
                 print("  Unknown command. Use A/E#/R#/C/D")
 
+    def _obstacle_edit_menu_with_state(self, mission_state) -> None:
+        """Interactive menu to edit/remove obstacles using MissionState (v2.0.0)."""
+        while True:
+            obstacles = mission_state.obstacles
+            if not obstacles:
+                print("\nNo obstacles configured.")
+                break
+
+            print(f"\nCurrent obstacles ({len(obstacles)}):")
+            for i, (x, y, r) in enumerate(obstacles, 1):
+                print(f"  {i}. ({x:.2f}, {y:.2f}) r={r:.2f}")
+
+            print("\nOptions: [A]dd, [E]dit #, [R]emove #, [C]lear all, [D]one")
+            choice = input("Choice: ").strip().lower()
+
+            if choice == "d" or choice == "":
+                break
+            elif choice == "a":
+                self._add_single_obstacle_to_state(mission_state)
+            elif choice == "c":
+                mission_state.obstacles = []
+                mission_state.obstacles_enabled = False
+                print("  All obstacles cleared.")
+                break
+            elif choice.startswith("e") and len(choice) > 1:
+                try:
+                    idx = int(choice[1:].strip()) - 1
+                    if 0 <= idx < len(obstacles):
+                        self._edit_obstacle_in_state(idx, mission_state)
+                    else:
+                        print(f"  Invalid index. Use 1-{len(obstacles)}")
+                except ValueError:
+                    print("  Invalid format. Use 'E1', 'E2', etc.")
+            elif choice.startswith("r") and len(choice) > 1:
+                try:
+                    idx = int(choice[1:].strip()) - 1
+                    if 0 <= idx < len(obstacles):
+                        removed = obstacles.pop(idx)
+                        mission_state.obstacles = obstacles
+                        rx, ry = removed[0], removed[1]
+                        print(f"  Removed obstacle at ({rx:.2f}, {ry:.2f})")
+                    else:
+                        print(f"  Invalid index. Use 1-{len(obstacles)}")
+                except ValueError:
+                    print("  Invalid format. Use 'R1', 'R2', etc.")
+            else:
+                print("  Unknown command. Use A/E#/R#/C/D")
+
     def _add_single_obstacle(self) -> None:
-        """Add a single obstacle interactively."""
+        """Add a single obstacle interactively (legacy mode)."""
         try:
             obs_x = float(input("  X position (meters): "))
             obs_y = float(input("  Y position (meters): "))
@@ -294,8 +359,20 @@ class MissionCLI:
         except ValueError:
             print("  Invalid input, obstacle not added.")
 
+    def _add_single_obstacle_to_state(self, mission_state) -> None:
+        """Add a single obstacle interactively using MissionState (v2.0.0)."""
+        try:
+            obs_x = float(input("  X position (meters): "))
+            obs_y = float(input("  Y position (meters): "))
+            obs_r_input = input("  Radius (meters, default 0.3): ").strip()
+            obs_r = float(obs_r_input) if obs_r_input else 0.3
+            mission_state.obstacles.append((obs_x, obs_y, obs_r))
+            mission_state.obstacles_enabled = True
+        except ValueError:
+            print("  Invalid input, obstacle not added.")
+
     def _edit_obstacle(self, idx: int, obstacles: List) -> None:
-        """Edit an existing obstacle."""
+        """Edit an existing obstacle (legacy mode)."""
         old = obstacles[idx]
         print(f"  Editing obstacle {idx+1}: " f"({old[0]:.2f}, {old[1]:.2f}) r={old[2]:.2f}")
         try:
@@ -313,8 +390,33 @@ class MissionCLI:
         except ValueError:
             print("  Invalid input, obstacle unchanged.")
 
-    def _configure_obstacles_manual(self) -> None:
-        """Manual obstacle entry (legacy method)."""
+    def _edit_obstacle_in_state(self, idx: int, mission_state) -> None:
+        """Edit an existing obstacle using MissionState (v2.0.0)."""
+        obstacles = mission_state.obstacles
+        old = obstacles[idx]
+        print(f"  Editing obstacle {idx+1}: " f"({old[0]:.2f}, {old[1]:.2f}) r={old[2]:.2f}")
+        try:
+            x_input = input(f"  New X (enter for {old[0]:.2f}): ").strip()
+            y_input = input(f"  New Y (enter for {old[1]:.2f}): ").strip()
+            r_input = input(f"  New radius (enter for {old[2]:.2f}): ").strip()
+
+            new_x = float(x_input) if x_input else old[0]
+            new_y = float(y_input) if y_input else old[1]
+            new_r = float(r_input) if r_input else old[2]
+
+            obstacles[idx] = (new_x, new_y, new_r)
+            mission_state.obstacles = obstacles
+            print(f"  Updated: ({new_x:.2f}, {new_y:.2f}) r={new_r:.2f}")
+        except ValueError:
+            print("  Invalid input, obstacle unchanged.")
+
+    def _configure_obstacles_manual(self) -> List[Tuple[float, float, float]]:
+        """Manual obstacle entry.
+        
+        Returns:
+            List of obstacles as (x, y, radius) tuples.
+        """
+        obstacles: List[Tuple[float, float, float]] = []
         add_obs = input("Add obstacle? (y/n): ").strip().lower()
         while add_obs == "y":
             try:
@@ -322,9 +424,8 @@ class MissionCLI:
                 obs_y = float(input("  Obstacle Y position (meters): "))
                 obs_r_input = input("  Obstacle radius (meters, default 0.5): ").strip()
                 obs_r = float(obs_r_input) if obs_r_input else 0.5
-                SatelliteConfig.add_obstacle(obs_x, obs_y, obs_r)
-                ox, oy, or_ = obs_x, obs_y, obs_r
-                print(f"  Obstacle added: ({ox:.2f}, {oy:.2f}), r={or_:.2f}")
+                obstacles.append((obs_x, obs_y, obs_r))
+                print(f"  Obstacle added: ({obs_x:.2f}, {obs_y:.2f}), r={obs_r:.2f}")
             except ValueError:
                 print("  Invalid input, skipping obstacle.")
             except KeyboardInterrupt:
@@ -332,10 +433,19 @@ class MissionCLI:
                 raise
 
             add_obs = input("Add another obstacle? (y/n): ").strip().lower()
+        
+        # Backward compatibility: update SatelliteConfig
+        for x, y, r in obstacles:
+            SatelliteConfig.add_obstacle(x, y, r)
+        
+        return obstacles
 
-    def select_mission_preset(self) -> Optional[Dict[str, Any]]:
+    def select_mission_preset(self, return_simulation_config: bool = False) -> Optional[Dict[str, Any]]:
         """Select a mission preset for quick start.
 
+        Args:
+            return_simulation_config: If True, includes SimulationConfig in returned dict.
+            
         Returns:
             Mission config dict if preset selected, None for custom mission.
         """
@@ -348,9 +458,18 @@ class MissionCLI:
 
         choice = input("Select option (1-5, default 1): ").strip()
 
+        # Create SimulationConfig for v2.0.0 pattern
+        simulation_config = SimulationConfig.create_default()
+        mission_state = simulation_config.mission_state
+
         if choice == "2":
             # Simple demo: corner to origin
             print("\n  Preset: Simple navigation (1,1,1) → (0,0,0)")
+            obstacles = []
+            mission_state.obstacles = []
+            mission_state.obstacles_enabled = False
+            
+            # Backward compatibility
             SatelliteConfig.clear_obstacles()
             SatelliteConfig.OBSTACLES_ENABLED = False
 
@@ -362,9 +481,10 @@ class MissionCLI:
                 start_pos=(1.0, 1.0, 1.0),
                 start_angle=(0.0, 0.0, np.radians(90)),
                 targets=[((0.0, 0.0, 0.0), (0.0, 0.0, 0.0))],
+                mission_state=mission_state,
             )
 
-            return {
+            result = {
                 "mission_type": "waypoint_navigation",
                 "mode": "multi_point",
                 "start_pos": (1.0, 1.0, 1.0),
@@ -374,11 +494,19 @@ class MissionCLI:
                 "start_vz": 0.0,
                 "start_omega": 0.0,
             }
+            if return_simulation_config:
+                result["simulation_config"] = simulation_config
+            return result
 
         elif choice == "3":
             # Diagonal with central obstacle
             print("\n  Preset: Diagonal with central obstacle")
             print("    (1,1,1) → (-1,-1,0) avoiding obstacle at (0,0)")
+            obstacles = [(0.0, 0.0, 0.3)]
+            mission_state.obstacles = obstacles
+            mission_state.obstacles_enabled = True
+            
+            # Backward compatibility
             SatelliteConfig.clear_obstacles()
             SatelliteConfig.add_obstacle(0.0, 0.0, 0.3)
             SatelliteConfig.OBSTACLES_ENABLED = True
@@ -391,9 +519,10 @@ class MissionCLI:
                 start_pos=(1.0, 1.0, 1.0),
                 start_angle=(0.0, 0.0, np.radians(45)),
                 targets=[((-1.0, -1.0, 0.0), (0.0, 0.0, np.radians(-135)))],
+                mission_state=mission_state,
             )
 
-            return {
+            result = {
                 "mission_type": "waypoint_navigation",
                 "mode": "multi_point",
                 "start_pos": (1.0, 1.0, 1.0),
@@ -403,11 +532,19 @@ class MissionCLI:
                 "start_vz": 0.0,
                 "start_omega": 0.0,
             }
+            if return_simulation_config:
+                result["simulation_config"] = simulation_config
+            return result
 
         elif choice == "4":
             # Multi-waypoint square pattern
             print("\n  Preset: Multi-waypoint square pattern")
             print("    (0,0,0.5) → (1,0,1.0) → (1,1,0.5) → (0,1,0.0) → (0,0,0.5)")
+            obstacles = []
+            mission_state.obstacles = []
+            mission_state.obstacles_enabled = False
+            
+            # Backward compatibility
             SatelliteConfig.clear_obstacles()
             SatelliteConfig.OBSTACLES_ENABLED = False
 
@@ -424,9 +561,10 @@ class MissionCLI:
                 start_pos=(0.0, 0.0, 0.5),
                 start_angle=(0.0, 0.0, 0.0),
                 targets=targets,
+                mission_state=mission_state,
             )
 
-            return {
+            result = {
                 "mission_type": "waypoint_navigation",
                 "mode": "multi_point",
                 "start_pos": (0.0, 0.0, 0.5),
@@ -436,11 +574,19 @@ class MissionCLI:
                 "start_vz": 0.0,
                 "start_omega": 0.0,
             }
+            if return_simulation_config:
+                result["simulation_config"] = simulation_config
+            return result
 
         elif choice == "5":
             # Corridor navigation
             print("\n  Preset: Corridor navigation")
             print("    (1,0,1.0) → (-1,0,0.5) through gap between obstacles")
+            obstacles = [(0.0, 0.5, 0.3), (0.0, -0.5, 0.3)]
+            mission_state.obstacles = obstacles
+            mission_state.obstacles_enabled = True
+            
+            # Backward compatibility
             SatelliteConfig.clear_obstacles()
             SatelliteConfig.add_obstacle(0.0, 0.5, 0.3)
             SatelliteConfig.add_obstacle(0.0, -0.5, 0.3)
@@ -453,9 +599,10 @@ class MissionCLI:
                 start_pos=(1.0, 0.0, 1.0),
                 start_angle=(0.0, 0.0, np.radians(180)),
                 targets=[((-1.0, 0.0, 0.5), (0.0, 0.0, np.radians(180)))],
+                mission_state=mission_state,
             )
 
-            return {
+            result = {
                 "mission_type": "waypoint_navigation",
                 "mode": "multi_point",
                 "start_pos": (1.0, 0.0, 1.0),
@@ -465,6 +612,9 @@ class MissionCLI:
                 "start_vz": 0.0,
                 "start_omega": 0.0,
             }
+            if return_simulation_config:
+                result["simulation_config"] = simulation_config
+            return result
 
         # Default: return None for custom mission flow
         return None
@@ -474,29 +624,61 @@ class MissionCLI:
         start_pos: Tuple[float, float, float],
         start_angle: Tuple[float, float, float],
         targets: List[Tuple[Tuple[float, float, float], Tuple[float, float, float]]],
+        mission_state=None,
     ) -> None:
-        """Configure SatelliteConfig for preset waypoint missions."""
+        """Configure waypoint missions.
+        
+        Args:
+            start_pos: Starting position (x, y, z)
+            start_angle: Starting angle (roll, pitch, yaw)
+            targets: List of (position, angle) tuples
+            mission_state: Optional MissionState to update. If None, uses SatelliteConfig (legacy).
+        """
         target_positions = [t[0] for t in targets]
-        target_angles = [t[1] for t in targets]
+        # Extract yaw from angles (3D Euler angles -> single yaw value for waypoints)
+        target_angles = [t[1][2] if isinstance(t[1], tuple) and len(t[1]) == 3 else t[1] for t in targets]
 
-        SatelliteConfig.DEFAULT_START_POS = start_pos
-        SatelliteConfig.DEFAULT_START_ANGLE = start_angle
-        SatelliteConfig.DEFAULT_TARGET_POS = target_positions[0]
-        SatelliteConfig.DEFAULT_TARGET_ANGLE = target_angles[0]
+        if mission_state is None:
+            # Legacy mode: update SatelliteConfig
+            SatelliteConfig.DEFAULT_START_POS = start_pos
+            SatelliteConfig.DEFAULT_START_ANGLE = start_angle
+            SatelliteConfig.DEFAULT_TARGET_POS = target_positions[0]
+            SatelliteConfig.DEFAULT_TARGET_ANGLE = target_angles[0]
 
-        SatelliteConfig.set_multi_point_mode(True)
-        SatelliteConfig.ENABLE_WAYPOINT_MODE = True
-        SatelliteConfig.WAYPOINT_TARGETS = target_positions
-        SatelliteConfig.WAYPOINT_ANGLES = target_angles
-        SatelliteConfig.CURRENT_TARGET_INDEX = 0
-        SatelliteConfig.TARGET_STABILIZATION_START_TIME = None
+            SatelliteConfig.set_multi_point_mode(True)
+            SatelliteConfig.ENABLE_WAYPOINT_MODE = True
+            SatelliteConfig.WAYPOINT_TARGETS = target_positions
+            SatelliteConfig.WAYPOINT_ANGLES = target_angles
+            SatelliteConfig.CURRENT_TARGET_INDEX = 0
+            SatelliteConfig.TARGET_STABILIZATION_START_TIME = None
+        else:
+            # v2.0.0 mode: update MissionState
+            mission_state.enable_waypoint_mode = True
+            mission_state.enable_multi_point_mode = True
+            mission_state.waypoint_targets = target_positions
+            mission_state.waypoint_angles = target_angles
+            mission_state.current_target_index = 0
+            mission_state.target_stabilization_start_time = None
 
-    def run_multi_point_mode(self) -> Dict[str, Any]:
-        """Run the multi-point waypoint mission workflow."""
+    def run_multi_point_mode(self, return_simulation_config: bool = False) -> Dict[str, Any]:
+        """Run the multi-point waypoint mission workflow.
+        
+        Args:
+            return_simulation_config: If True, returns SimulationConfig in dict. If False, returns legacy dict.
+            
+        Returns:
+            Dictionary with mission configuration. If return_simulation_config=True, includes 'simulation_config' key.
+        """
+        # Create SimulationConfig for v2.0.0 pattern
+        simulation_config = SimulationConfig.create_default()
+        mission_state = simulation_config.mission_state
+        
         # 1. Try to select a preset first
         preset_config = self.select_mission_preset()
         if preset_config:
             # Presets handle their own obstacles, just return.
+            if return_simulation_config:
+                preset_config["simulation_config"] = simulation_config
             return preset_config
 
         # 2. If no preset selected (returns None), do custom configuration
@@ -537,22 +719,34 @@ class MissionCLI:
             except ValueError:
                 print("Invalid input. Numeric values required.")
 
-        self.configure_obstacles()
+        # Configure obstacles (updates mission_state if v2.0.0, SatelliteConfig if legacy)
+        obstacles = self.configure_obstacles(mission_state=mission_state)
 
-        # Update Config
+        # Extract yaw from angles for waypoint_angles (single values, not tuples)
+        waypoint_angles = [angle[2] if isinstance(angle, tuple) and len(angle) == 3 else angle for angle in angles]
+
+        # Update MissionState (v2.0.0)
+        mission_state.enable_waypoint_mode = True
+        mission_state.enable_multi_point_mode = True
+        mission_state.waypoint_targets = targets
+        mission_state.waypoint_angles = waypoint_angles
+        mission_state.current_target_index = 0
+        mission_state.target_stabilization_start_time = None
+
+        # Backward compatibility: update SatelliteConfig
         SatelliteConfig.DEFAULT_START_POS = start_pos
         SatelliteConfig.DEFAULT_START_ANGLE = start_angle
         SatelliteConfig.DEFAULT_TARGET_POS = targets[0]
-        SatelliteConfig.DEFAULT_TARGET_ANGLE = angles[0]
+        SatelliteConfig.DEFAULT_TARGET_ANGLE = waypoint_angles[0]
 
         SatelliteConfig.set_multi_point_mode(True)
         SatelliteConfig.ENABLE_WAYPOINT_MODE = True
         SatelliteConfig.WAYPOINT_TARGETS = targets
-        SatelliteConfig.WAYPOINT_ANGLES = angles
+        SatelliteConfig.WAYPOINT_ANGLES = waypoint_angles
         SatelliteConfig.CURRENT_TARGET_INDEX = 0
         SatelliteConfig.TARGET_STABILIZATION_START_TIME = None
 
-        return {
+        result = {
             "mission_type": "waypoint_navigation",
             "mode": "multi_point",
             "start_pos": start_pos,
@@ -562,3 +756,8 @@ class MissionCLI:
             "start_vz": start_vz,
             "start_omega": start_omega,
         }
+        
+        if return_simulation_config:
+            result["simulation_config"] = simulation_config
+            
+        return result

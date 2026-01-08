@@ -80,13 +80,26 @@ def run(
         sim_target_pos = (0.0, 0.0, 0.0)
         sim_start_angle = (0.0, 0.0, 0.0)
         sim_target_angle = (0.0, 0.0, 0.0)
-    elif classic:
+    # Mission configuration from CLI (v2.0.0: uses SimulationConfig)
+    mission_simulation_config = None
+    
+    if classic:
         # Use classic text-based menu
         mission_manager = MissionManager()
         mode = mission_manager.show_mission_menu()
-        if not mission_manager.run_selected_mission(mode):
+        mission_result = mission_manager.run_selected_mission(mode)
+        if not mission_result:
             console.print("[red]Mission configuration cancelled.[/red]")
             raise typer.Exit()
+        # Extract SimulationConfig if available (v2.0.0)
+        if isinstance(mission_result, dict) and "simulation_config" in mission_result:
+            mission_simulation_config = mission_result["simulation_config"]
+        # Extract start position/angle for backward compatibility
+        if isinstance(mission_result, dict):
+            if "start_pos" in mission_result:
+                sim_start_pos = mission_result.get("start_pos")
+            if "start_angle" in mission_result:
+                sim_start_angle = mission_result.get("start_angle")
     else:
         # Use new interactive menu
         try:
@@ -98,13 +111,16 @@ def run(
             mode = interactive_cli.show_mission_menu()
 
             if mode == "waypoint":
-                mission_preset = interactive_cli.select_mission_preset()
+                mission_preset = interactive_cli.select_mission_preset(return_simulation_config=True)
                 if mission_preset is None:
                     # Custom mission flow
                     mission_config = interactive_cli.run_custom_waypoint_mission()
                     if not mission_config:
                         console.print("[red]Mission cancelled.[/red]")
                         raise typer.Exit()
+                    # Extract SimulationConfig if available (v2.0.0)
+                    if "simulation_config" in mission_config:
+                        mission_simulation_config = mission_config["simulation_config"]
                     # Extract mission parameters from config
                     if "start_pos" in mission_config:
                         sim_start_pos = mission_config.get("start_pos")
@@ -115,6 +131,9 @@ def run(
                     console.print("[red]Mission cancelled.[/red]")
                     raise typer.Exit()
                 else:
+                    # Extract SimulationConfig if available (v2.0.0)
+                    if "simulation_config" in mission_preset:
+                        mission_simulation_config = mission_preset["simulation_config"]
                     # Extract mission parameters from preset
                     if "start_pos" in mission_preset:
                         sim_start_pos = mission_preset.get("start_pos")
@@ -126,6 +145,9 @@ def run(
                 if not mission_config:
                     console.print("[red]Mission cancelled.[/red]")
                     raise typer.Exit()
+                # Extract SimulationConfig if available (v2.0.0)
+                if "simulation_config" in mission_config:
+                    mission_simulation_config = mission_config["simulation_config"]
                 # Extract mission parameters from config
                 if "start_pos" in mission_config:
                     sim_start_pos = mission_config.get("start_pos")
@@ -136,9 +158,13 @@ def run(
             console.print("[yellow]Falling back to classic menu...[/yellow]")
             mission_manager = MissionManager()
             mode = mission_manager.show_mission_menu()
-            if not mission_manager.run_selected_mission(mode):
+            mission_result = mission_manager.run_selected_mission(mode)
+            if not mission_result:
                 console.print("[red]Mission cancelled.[/red]")
                 raise typer.Exit()
+            # Extract SimulationConfig if available
+            if isinstance(mission_result, dict) and "simulation_config" in mission_result:
+                mission_simulation_config = mission_result["simulation_config"]
 
     # Load MPC configuration preset if specified (CLI option)
     # Note: This is different from mission presets from interactive CLI
@@ -185,12 +211,20 @@ def run(
         config_overrides["simulation"]["max_duration"] = duration
         console.print(f"  Override: Duration = {duration}s")
 
-    # Create SimulationConfig if we have overrides or preset
+    # Create SimulationConfig (v2.0.0 pattern)
+    from src.satellite_control.config.simulation_config import SimulationConfig
+    
     simulation_config = None
-    if config_overrides or preset:
-        from src.satellite_control.config.simulation_config import SimulationConfig
-        
-        # Create config with overrides
+    if mission_simulation_config:
+        # Use SimulationConfig from mission CLI (preferred, v2.0.0)
+        simulation_config = mission_simulation_config
+        # Apply overrides if provided
+        if config_overrides:
+            simulation_config = SimulationConfig.create_with_overrides(
+                config_overrides, base_config=simulation_config
+            )
+    elif config_overrides or preset:
+        # Create config with overrides (no mission config available)
         simulation_config = SimulationConfig.create_with_overrides(
             config_overrides or {}
         )

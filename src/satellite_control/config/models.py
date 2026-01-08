@@ -298,6 +298,11 @@ class SimulationParams(BaseModel):
         description="Window height in pixels",
     )
 
+    use_final_stabilization: bool = Field(
+        False,
+        description="Require final stabilization hold before terminating missions",
+    )
+
 
 class AppConfig(BaseModel):
     """

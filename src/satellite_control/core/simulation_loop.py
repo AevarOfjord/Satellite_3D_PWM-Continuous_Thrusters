@@ -44,6 +44,46 @@ class SimulationLoop:
             simulation: The SatelliteMPCLinearizedSimulation instance
         """
         self.simulation = simulation
+    
+    def _get_mission_state(self):
+        """Get mission_state from simulation_config or SatelliteConfig (backward compat)."""
+        if hasattr(self.simulation, 'simulation_config') and self.simulation.simulation_config:
+            return self.simulation.simulation_config.mission_state
+        return None
+    
+    def _get_app_config(self):
+        """Get app_config from simulation_config or SatelliteConfig (backward compat)."""
+        if hasattr(self.simulation, 'simulation_config') and self.simulation.simulation_config:
+            return self.simulation.simulation_config.app_config
+        return None
+    
+    def _is_waypoint_mode(self) -> bool:
+        """Check if waypoint mode is enabled."""
+        mission_state = self._get_mission_state()
+        if mission_state:
+            return mission_state.enable_waypoint_mode or mission_state.enable_multi_point_mode
+        return getattr(SatelliteConfig, "ENABLE_WAYPOINT_MODE", False)
+    
+    def _is_dxf_mode(self) -> bool:
+        """Check if DXF shape mode is enabled."""
+        mission_state = self._get_mission_state()
+        if mission_state:
+            return mission_state.dxf_shape_mode_active
+        return getattr(SatelliteConfig, "DXF_SHAPE_MODE_ACTIVE", False)
+    
+    def _get_current_target_index(self) -> int:
+        """Get current target index."""
+        mission_state = self._get_mission_state()
+        if mission_state:
+            return mission_state.current_target_index
+        return getattr(SatelliteConfig, "CURRENT_TARGET_INDEX", 0)
+    
+    def _get_waypoint_targets(self):
+        """Get waypoint targets list."""
+        mission_state = self._get_mission_state()
+        if mission_state:
+            return mission_state.waypoint_targets or mission_state.multi_point_targets
+        return getattr(SatelliteConfig, "WAYPOINT_TARGETS", [])
 
     def run(
         self,
@@ -304,10 +344,7 @@ class SimulationLoop:
         """
         from src.satellite_control.utils.orientation_utils import quat_angle_error
 
-        if not (
-            hasattr(SatelliteConfig, "DXF_SHAPE_MODE_ACTIVE")
-            and SatelliteConfig.DXF_SHAPE_MODE_ACTIVE
-        ):
+        if not self._is_dxf_mode():
             target_currently_reached = self.simulation.check_target_reached()
 
             if target_currently_reached:
@@ -333,10 +370,7 @@ class SimulationLoop:
                     self.simulation.maintenance_position_errors.append(float(pos_error))
                     self.simulation.maintenance_angle_errors.append(float(ang_error))
 
-                if (
-                    hasattr(SatelliteConfig, "ENABLE_WAYPOINT_MODE")
-                    and SatelliteConfig.ENABLE_WAYPOINT_MODE
-                ):
+                if self._is_waypoint_mode():
                     if self._handle_waypoint_advancement():
                         return True
             else:
@@ -348,28 +382,28 @@ class SimulationLoop:
                         " - MPC working to regain control"
                     )
 
+        app_config = self._get_app_config()
+        use_final_stab = (
+            app_config.simulation.use_final_stabilization 
+            if app_config else SatelliteConfig.USE_FINAL_STABILIZATION_IN_SIMULATION
+        )
+        
         if (
-            not SatelliteConfig.USE_FINAL_STABILIZATION_IN_SIMULATION
+            not use_final_stab
             and self.simulation.target_reached_time is not None
-            and not (
-                hasattr(SatelliteConfig, "ENABLE_WAYPOINT_MODE")
-                and SatelliteConfig.ENABLE_WAYPOINT_MODE
-            )
-            and not (
-                hasattr(SatelliteConfig, "DXF_SHAPE_MODE_ACTIVE")
-                and SatelliteConfig.DXF_SHAPE_MODE_ACTIVE
-            )
+            and not self._is_waypoint_mode()
+            and not self._is_dxf_mode()
         ):
             # Mission 1: Waypoint Navigation (single waypoint) with immediate
             # termination after target reached
             current_maintenance_time = (
                 self.simulation.simulation_time - self.simulation.target_reached_time
             )
-            if (
-                current_maintenance_time
-                >= SatelliteConfig.WAYPOINT_FINAL_STABILIZATION_TIME
-            ):
-                stab_time = SatelliteConfig.WAYPOINT_FINAL_STABILIZATION_TIME
+            stab_time = (
+                app_config.timing.waypoint_final_stabilization_time
+                if app_config else SatelliteConfig.WAYPOINT_FINAL_STABILIZATION_TIME
+            )
+            if current_maintenance_time >= stab_time:
                 print(
                     f"\n WAYPOINT MISSION COMPLETE! "
                     f"Stable at target for {stab_time:.1f} seconds."
@@ -378,10 +412,7 @@ class SimulationLoop:
                 self.simulation.print_performance_summary()
                 return True
 
-        if (
-            SatelliteConfig.USE_FINAL_STABILIZATION_IN_SIMULATION
-            and self.simulation.target_reached_time is not None
-        ):
+        if use_final_stab and self.simulation.target_reached_time is not None:
             if self._check_final_stabilization():
                 return True
 
@@ -407,27 +438,34 @@ class SimulationLoop:
 
         stabilization_time = self.simulation.target_maintenance_time
 
-        is_final_target = (
-            SatelliteConfig.CURRENT_TARGET_INDEX
-            >= len(SatelliteConfig.WAYPOINT_TARGETS) - 1
-        )
+        mission_state = self._get_mission_state()
+        app_config = self._get_app_config()
+        targets = self._get_waypoint_targets()
+        current_idx = self._get_current_target_index()
+        
+        is_final_target = current_idx >= len(targets) - 1
+        # Use legacy timing constants from SatelliteConfig; these are immutable
         if is_final_target:
-            required_hold_time = (
-                SatelliteConfig.WAYPOINT_FINAL_STABILIZATION_TIME
-            )
+            required_hold_time = SatelliteConfig.WAYPOINT_FINAL_STABILIZATION_TIME
         else:
             required_hold_time = getattr(SatelliteConfig, "TARGET_HOLD_TIME", 3.0)
 
         if stabilization_time >= required_hold_time:
             # Advance to next target
-            next_available = SatelliteConfig.advance_to_next_target()
+            if mission_state and self.simulation.mission_manager:
+                # Use mission_manager to advance (preferred)
+                next_available = self.simulation.mission_manager._advance_to_next_target()
+            else:
+                # Backward compatibility
+                next_available = SatelliteConfig.advance_to_next_target()
+            
             if next_available:
-                # Update target state to next target with obstacle
-                # avoidance
-                (
-                    target_pos,
-                    target_angle,
-                ) = SatelliteConfig.get_current_waypoint_target()
+                # Update target state to next target with obstacle avoidance
+                if mission_state and self.simulation.mission_manager:
+                    target_pos, target_angle = self.simulation.mission_manager._get_current_waypoint_target()
+                else:
+                    # Backward compatibility
+                    target_pos, target_angle = SatelliteConfig.get_current_waypoint_target()
                 if target_pos is not None:
                     roll_deg, pitch_deg, yaw_deg = np.degrees(target_angle)
                     logger.info(
@@ -449,12 +487,21 @@ class SimulationLoop:
             else:
                 # All targets completed - end simulation
                 logger.info("WAYPOINT MISSION COMPLETED! " "All targets visited.")
-                use_stab = SatelliteConfig.USE_FINAL_STABILIZATION_IN_SIMULATION
+                app_config = self._get_app_config()
+                use_stab = (
+                    app_config.simulation.use_final_stabilization
+                    if app_config else SatelliteConfig.USE_FINAL_STABILIZATION_IN_SIMULATION
+                )
                 if not use_stab:
                     self.simulation.is_running = False
                     self.simulation.print_performance_summary()
                     return True
-                SatelliteConfig.MULTI_POINT_PHASE = "COMPLETE"
+                # Update phase in mission_state if available
+                mission_state = self._get_mission_state()
+                if mission_state:
+                    mission_state.multi_point_phase = "COMPLETE"
+                # Backward compatibility
+                setattr(SatelliteConfig, "MULTI_POINT_PHASE", "COMPLETE")
         return False
 
     def _check_final_stabilization(self) -> bool:
@@ -468,41 +515,31 @@ class SimulationLoop:
             self.simulation.simulation_time - self.simulation.target_reached_time
         )
 
-        # Waypoint navigation: check completion for single or multiple
-        # waypoints
-        if not (
-            hasattr(SatelliteConfig, "DXF_SHAPE_MODE_ACTIVE")
-            and SatelliteConfig.DXF_SHAPE_MODE_ACTIVE
-        ):
+        # Waypoint navigation: check completion for single or multiple waypoints
+        mission_state = self._get_mission_state()
+        # Use legacy timing constant for now (immutable, safe to read)
+        stab_time = SatelliteConfig.WAYPOINT_FINAL_STABILIZATION_TIME
+        
+        if not self._is_dxf_mode():
             # Single waypoint (no ENABLE_WAYPOINT_MODE set)
-            if not (
-                hasattr(SatelliteConfig, "ENABLE_WAYPOINT_MODE")
-                and SatelliteConfig.ENABLE_WAYPOINT_MODE
-            ):
-                if (
-                    current_maintenance_time
-                    >= SatelliteConfig.WAYPOINT_FINAL_STABILIZATION_TIME
-                ):
-                    final_stab = SatelliteConfig.WAYPOINT_FINAL_STABILIZATION_TIME
-                    stab_t = final_stab
+            if not self._is_waypoint_mode():
+                if current_maintenance_time >= stab_time:
                     print(
                         f"\n WAYPOINT MISSION COMPLETE! "
-                        f"Stable at target for {stab_t:.1f} seconds."
+                        f"Stable at target for {stab_time:.1f} seconds."
                     )
                     self.simulation.is_running = False
                     self.simulation.print_performance_summary()
                     return True
             # Multiple waypoints (ENABLE_WAYPOINT_MODE = True)
-            elif getattr(SatelliteConfig, "MULTI_POINT_PHASE", None) == "COMPLETE":
-                if (
-                    current_maintenance_time
-                    >= SatelliteConfig.WAYPOINT_FINAL_STABILIZATION_TIME
-                ):
-                    final_stab = SatelliteConfig.WAYPOINT_FINAL_STABILIZATION_TIME
-                    stab_t = final_stab
+            elif (
+                (mission_state and mission_state.multi_point_phase == "COMPLETE")
+                or getattr(SatelliteConfig, "MULTI_POINT_PHASE", None) == "COMPLETE"
+            ):
+                if current_maintenance_time >= stab_time:
                     print(
                         f"\n WAYPOINT MISSION COMPLETE! "
-                        f"All targets stable for {stab_t:.1f} seconds."
+                        f"All targets stable for {stab_time:.1f} seconds."
                     )
                     self.simulation.is_running = False
                     self.simulation.print_performance_summary()

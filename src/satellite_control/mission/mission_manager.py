@@ -26,6 +26,7 @@ from typing import Any, Dict, List, Optional, Tuple
 import numpy as np
 
 from src.satellite_control.config import SatelliteConfig, timing
+from src.satellite_control.config.simulation_config import SimulationConfig
 from src.satellite_control.mission.mission_cli import MissionCLI
 from src.satellite_control.mission.mission_logic import MissionLogic
 
@@ -61,8 +62,19 @@ class MissionManager:
                 return self.run_dxf_shape_mode()
         return None
 
-    def run_dxf_shape_mode(self) -> Dict[str, Any]:
-        """Mode 2: Shape Following (Refactored)."""
+    def run_dxf_shape_mode(self, return_simulation_config: bool = False) -> Dict[str, Any]:
+        """Mode 2: Shape Following (Refactored).
+        
+        Args:
+            return_simulation_config: If True, includes SimulationConfig in returned dict.
+            
+        Returns:
+            Dictionary with mission configuration. If return_simulation_config=True, includes 'simulation_config' key.
+        """
+        # Create SimulationConfig for v2.0.0 pattern
+        simulation_config = SimulationConfig.create_default()
+        mission_state = simulation_config.mission_state
+        
         print("\n SHAPE FOLLOWING MISSION")
         print("Satellite will follow a moving target along a shape path.")
         print("  Phase 2: Track moving target along the shape path")
@@ -70,8 +82,10 @@ class MissionManager:
         print(f"  Phase 3: Stabilize at completion point ({stab_time:.1f}s)")
 
         print("\nSimulation starting configuration:")
-        start_pos = self.cli.get_user_position("starting", SatelliteConfig.DEFAULT_START_POS)
-        start_angle = self.cli.get_user_orientation("starting", SatelliteConfig.DEFAULT_START_ANGLE)
+        default_start_pos = getattr(SatelliteConfig, "DEFAULT_START_POS", (0.0, 0.0, 0.0))
+        default_start_angle = getattr(SatelliteConfig, "DEFAULT_START_ANGLE", (0.0, 0.0, 0.0))
+        start_pos = self.cli.get_user_position("starting", default_start_pos)
+        start_angle = self.cli.get_user_orientation("starting", default_start_angle)
         start_vx, start_vy, start_vz, start_omega = self.cli.get_user_velocities()
 
         # Print summary
@@ -262,7 +276,24 @@ class MissionManager:
             print("  Phase 3: Stabilize at final shape position (10s)")
         print(f"Mission duration: ~{estimated_duration:.1f}s estimated")
 
-        self.cli.configure_obstacles()
+        # Configure obstacles (updates mission_state if v2.0.0, SatelliteConfig if legacy)
+        obstacles = self.cli.configure_obstacles(mission_state=mission_state)
+
+        # Update MissionState (v2.0.0)
+        mission_state.dxf_shape_mode_active = True
+        mission_state.dxf_shape_center = shape_center
+        mission_state.dxf_base_shape = transformed_shape
+        mission_state.dxf_shape_path = upscaled_path
+        mission_state.dxf_target_speed = target_speed_mps
+        mission_state.dxf_estimated_duration = estimated_duration
+        mission_state.dxf_mission_start_time = None
+        mission_state.dxf_shape_phase = "POSITIONING"
+        mission_state.dxf_path_length = path_length
+        mission_state.dxf_has_return = has_return
+        if return_pos:
+            mission_state.dxf_return_position = return_pos
+        if return_angle:
+            mission_state.dxf_return_angle = return_angle
 
         config = {
             "mission_type": "shape_following",
@@ -290,6 +321,8 @@ class MissionManager:
                 "start_omega": start_omega,
             }
         )
+        
+        # Backward compatibility: update SatelliteConfig
         SatelliteConfig.DEFAULT_START_POS = start_pos
         SatelliteConfig.DEFAULT_START_ANGLE = start_angle
 
@@ -305,6 +338,9 @@ class MissionManager:
         SatelliteConfig.DXF_HAS_RETURN = has_return
         setattr(SatelliteConfig, "DXF_RETURN_POSITION", return_pos)
         setattr(SatelliteConfig, "DXF_RETURN_ANGLE", return_angle)
+        
+        if return_simulation_config:
+            config["simulation_config"] = simulation_config
 
         for attr in [
             "DXF_TRACKING_START_TIME",

@@ -174,14 +174,14 @@ class SatelliteMPCLinearizedSimulation:
                 config.clone() if config else build_structured_config(config_overrides)
             )
             # Create SimulationConfig from structured_config for internal use
-            # This allows gradual migration
+            # This allows gradual migration away from SatelliteConfig.
             app_config = SatelliteConfig.get_app_config()
-            # Sync mission state from SatelliteConfig (backward compatibility)
-            # This allows CLI components to mutate SatelliteConfig and we sync it here
-            from src.satellite_control.config.mission_state import sync_mission_state_from_satellite_config
-            
-            mission_state = sync_mission_state_from_satellite_config()
-            
+            # For v2.0.0, prefer a fresh MissionState; legacy CLIs now
+            # populate mission_state directly via SimulationConfig.
+            from src.satellite_control.config.mission_state import create_mission_state
+
+            mission_state = create_mission_state()
+
             self.simulation_config = SimulationConfig(
                 app_config=app_config,
                 mission_state=mission_state,
