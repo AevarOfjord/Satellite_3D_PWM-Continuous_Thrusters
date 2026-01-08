@@ -605,5 +605,54 @@ def install_mission(
     console.print(f"\nUse 'satellite-control list-missions' to see all available plugins.")
 
 
+@app.command("dashboard")
+def dashboard(
+    port: int = typer.Option(8501, "--port", "-p", help="Port to run dashboard on"),
+    host: str = typer.Option("localhost", "--host", help="Host to bind to"),
+):
+    """
+    Launch the Streamlit web dashboard.
+    
+    Opens a web-based interface for monitoring and analyzing simulation data.
+    """
+    from pathlib import Path
+    import subprocess
+    import sys
+    
+    dashboard_path = Path(__file__).parent / "visualization" / "dashboard.py"
+    
+    if not dashboard_path.exists():
+        console.print(f"[red]Error: Dashboard file not found: {dashboard_path}[/red]")
+        raise typer.Exit(1)
+    
+    console.print(f"[bold blue]Launching Satellite Control Dashboard...[/bold blue]")
+    console.print(f"  URL: http://{host}:{port}")
+    console.print(f"  Press Ctrl+C to stop")
+    
+    try:
+        subprocess.run(
+            [
+                sys.executable,
+                "-m",
+                "streamlit",
+                "run",
+                str(dashboard_path),
+                "--server.port",
+                str(port),
+                "--server.address",
+                host,
+            ],
+            check=True,
+        )
+    except KeyboardInterrupt:
+        console.print("\n[yellow]Dashboard stopped.[/yellow]")
+    except subprocess.CalledProcessError as e:
+        console.print(f"[red]Error launching dashboard: {e}[/red]")
+        raise typer.Exit(1)
+    except FileNotFoundError:
+        console.print("[red]Error: Streamlit not found. Install with: pip install streamlit[/red]")
+        raise typer.Exit(1)
+
+
 if __name__ == "__main__":
     app()

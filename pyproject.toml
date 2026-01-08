@@ -74,6 +74,7 @@ Repository = "https://github.com/AevarOfjord/SatelliteProject"
 satellite-sim = "simulation:main"
 satellite-visualize = "visualization_manager:main"
 satellite-test = "testing_environment:main"
+satellite-control = "src.satellite_control.cli:app"
 
 # Black configuration
 [tool.black]

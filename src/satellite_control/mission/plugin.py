@@ -208,13 +208,67 @@ class MissionPluginRegistry:
         Args:
             plugin: Plugin instance to register
             name: Optional name override (defaults to plugin.get_name())
+            
+        Raises:
+            ValueError: If plugin validation fails
         """
+        # Validate plugin
+        validation_errors = self._validate_plugin(plugin)
+        if validation_errors:
+            error_msg = f"Plugin validation failed for {plugin.get_name()}: " + "; ".join(validation_errors)
+            logger.error(error_msg)
+            raise ValueError(error_msg)
+        
         plugin_name = name or plugin.get_name()
         if plugin_name in self._plugins:
             logger.warning(f"Plugin '{plugin_name}' already registered, overwriting")
         
         self._plugins[plugin_name] = plugin
         logger.info(f"Registered plugin: {plugin_name} ({plugin.get_display_name()})")
+    
+    def _validate_plugin(self, plugin: MissionPlugin) -> List[str]:
+        """
+        Validate a plugin instance.
+        
+        Args:
+            plugin: Plugin to validate
+            
+        Returns:
+            List of validation error messages (empty if valid)
+        """
+        errors = []
+        
+        # Check required methods
+        try:
+            name = plugin.get_name()
+            if not name or not isinstance(name, str):
+                errors.append("get_name() must return a non-empty string")
+        except Exception as e:
+            errors.append(f"get_name() failed: {e}")
+        
+        try:
+            display_name = plugin.get_display_name()
+            if not display_name or not isinstance(display_name, str):
+                errors.append("get_display_name() must return a non-empty string")
+        except Exception as e:
+            errors.append(f"get_display_name() failed: {e}")
+        
+        try:
+            description = plugin.get_description()
+            if not description or not isinstance(description, str):
+                errors.append("get_description() must return a non-empty string")
+        except Exception as e:
+            errors.append(f"get_description() failed: {e}")
+        
+        # Check that name is valid identifier
+        try:
+            name = plugin.get_name()
+            if not name.replace("_", "").replace("-", "").isalnum():
+                errors.append(f"Plugin name '{name}' contains invalid characters (use alphanumeric, _, -)")
+        except Exception:
+            pass  # Already caught above
+        
+        return errors
     
     def load_plugin_from_file(self, file_path: Path) -> Optional[MissionPlugin]:
         """
@@ -225,8 +279,25 @@ class MissionPluginRegistry:
             
         Returns:
             Plugin instance or None if loading failed
+            
+        Raises:
+            ValueError: If plugin validation fails
         """
         try:
+            file_path = Path(file_path).expanduser().resolve()
+            
+            if not file_path.exists():
+                logger.error(f"Plugin file not found: {file_path}")
+                return None
+            
+            if not file_path.is_file():
+                logger.error(f"Plugin path is not a file: {file_path}")
+                return None
+            
+            if file_path.suffix != ".py":
+                logger.error(f"Plugin file must be a Python file (.py): {file_path}")
+                return None
+            
             spec = importlib.util.spec_from_file_location(
                 f"mission_plugin_{file_path.stem}", file_path
             )
@@ -238,6 +309,7 @@ class MissionPluginRegistry:
             spec.loader.exec_module(module)
             
             # Find MissionPlugin subclass in module
+            plugin_class = None
             for attr_name in dir(module):
                 attr = getattr(module, attr_name)
                 if (
@@ -245,16 +317,38 @@ class MissionPluginRegistry:
                     and issubclass(attr, MissionPlugin)
                     and attr is not MissionPlugin
                 ):
-                    plugin = attr()
-                    self.register_plugin(plugin)
-                    self._plugin_paths[plugin.get_name()] = file_path
-                    return plugin
+                    plugin_class = attr
+                    break
             
-            logger.warning(f"No MissionPlugin subclass found in {file_path}")
-            return None
+            if plugin_class is None:
+                logger.warning(f"No MissionPlugin subclass found in {file_path}")
+                return None
             
+            # Instantiate and validate plugin
+            try:
+                plugin = plugin_class()
+            except Exception as e:
+                logger.error(f"Failed to instantiate plugin from {file_path}: {e}")
+                return None
+            
+            # Validate before registering
+            validation_errors = self._validate_plugin(plugin)
+            if validation_errors:
+                error_msg = f"Plugin validation failed: " + "; ".join(validation_errors)
+                logger.error(f"{file_path}: {error_msg}")
+                return None
+            
+            self.register_plugin(plugin)
+            self._plugin_paths[plugin.get_name()] = file_path
+            return plugin
+            
+        except ValueError:
+            # Re-raise validation errors
+            raise
         except Exception as e:
             logger.error(f"Failed to load plugin from {file_path}: {e}")
+            import traceback
+            logger.debug(traceback.format_exc())
             return None
     
     def discover_plugins(self) -> int:
@@ -349,3 +443,94 @@ def discover_plugins() -> int:
 def get_plugin(name: str) -> Optional[MissionPlugin]:
     """Get a plugin from the global registry."""
     return _registry.get_plugin(name)
+
+
+def load_plugins_from_config(config_path: Path) -> int:
+    """
+    Load plugins specified in a configuration file.
+    
+    Config file format (YAML or JSON):
+        plugins:
+          - path: /path/to/plugin.py
+            name: custom_mission  # optional override
+          - path: ~/.satellite_control/plugins/my_mission.py
+    
+    Args:
+        config_path: Path to config file (.yaml, .yml, or .json)
+        
+    Returns:
+        Number of plugins loaded
+        
+    Raises:
+        FileNotFoundError: If config file doesn't exist
+        ValueError: If config format is invalid
+    """
+    config_path = Path(config_path).expanduser().resolve()
+    
+    if not config_path.exists():
+        raise FileNotFoundError(f"Config file not found: {config_path}")
+    
+    # Load config file
+    try:
+        import yaml
+        YAML_AVAILABLE = True
+    except ImportError:
+        YAML_AVAILABLE = False
+    
+    import json
+    
+    if config_path.suffix.lower() in (".yaml", ".yml"):
+        if not YAML_AVAILABLE:
+            raise ValueError(
+                "YAML file detected but PyYAML not installed. "
+                "Install with: pip install pyyaml"
+            )
+        with open(config_path, "r") as f:
+            config_dict = yaml.safe_load(f)
+    elif config_path.suffix.lower() == ".json":
+        with open(config_path, "r") as f:
+            config_dict = json.load(f)
+    else:
+        raise ValueError(
+            f"Unsupported file format: {config_path.suffix}. "
+            "Use .yaml, .yml, or .json"
+        )
+    
+    if not isinstance(config_dict, dict):
+        raise ValueError("Config file must contain a dictionary")
+    
+    # Extract plugin paths
+    plugins_list = config_dict.get("plugins", [])
+    if not isinstance(plugins_list, list):
+        raise ValueError("'plugins' must be a list")
+    
+    registry = get_registry()
+    loaded_count = 0
+    
+    for plugin_spec in plugins_list:
+        if isinstance(plugin_spec, str):
+            # Simple string path
+            plugin_path = Path(plugin_spec).expanduser().resolve()
+            plugin = registry.load_plugin_from_file(plugin_path)
+            if plugin:
+                loaded_count += 1
+        elif isinstance(plugin_spec, dict):
+            # Dictionary with path and optional name
+            plugin_path_str = plugin_spec.get("path")
+            if not plugin_path_str:
+                logger.warning(f"Plugin spec missing 'path': {plugin_spec}")
+                continue
+            
+            plugin_path = Path(plugin_path_str).expanduser().resolve()
+            plugin = registry.load_plugin_from_file(plugin_path)
+            if plugin:
+                plugin_name = plugin_spec.get("name")
+                if plugin_name and plugin_name != plugin.get_name():
+                    # Re-register with custom name
+                    registry.register_plugin(plugin, name=plugin_name)
+                loaded_count += 1
+        else:
+            logger.warning(f"Invalid plugin spec format: {plugin_spec}")
+    
+    logger.info(f"Loaded {loaded_count} plugin(s) from {config_path}")
+    return loaded_count

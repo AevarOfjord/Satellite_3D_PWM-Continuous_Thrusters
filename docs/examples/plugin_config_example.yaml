@@ -1,0 +1,27 @@
+# Example Plugin Configuration File
+# V4.0.0: Phase 2 - Mission Plugin System
+#
+# This file demonstrates how to configure custom mission plugins.
+# Place this file in your project directory or user config directory.
+#
+# Usage:
+#   from src.satellite_control.mission.plugin import load_plugins_from_config
+#   load_plugins_from_config("plugin_config_example.yaml")
+
+plugins:
+  # Simple plugin path (string format)
+  - path: ~/.satellite_control/plugins/my_custom_mission.py
+  
+  # Plugin with custom name override (dictionary format)
+  - path: src/satellite_control/mission/plugins/example_custom_plugin.py
+    name: hover_mission  # Optional: override plugin name
+  
+  # Another example
+  - path: /absolute/path/to/another_plugin.py
+    name: custom_mission_type
+
+# Optional: Plugin search paths (if not using default)
+# search_paths:
+#   - ~/.satellite_control/plugins
+#   - ./custom_plugins
+#   - /shared/plugins

@@ -1,0 +1,15 @@
+{
+  "plugins": [
+    {
+      "path": "~/.satellite_control/plugins/my_custom_mission.py"
+    },
+    {
+      "path": "src/satellite_control/mission/plugins/example_custom_plugin.py",
+      "name": "hover_mission"
+    },
+    {
+      "path": "/absolute/path/to/another_plugin.py",
+      "name": "custom_mission_type"
+    }
+  ]
+}
