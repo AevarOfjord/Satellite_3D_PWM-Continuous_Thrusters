@@ -6,7 +6,6 @@ from src.satellite_control.core.simulation import SatelliteMPCLinearizedSimulati
 def test_headless_physics():
     print("Testing Headless Physics...")
 
-    # Configure for movement
     # Configure for movement -- 3D
     start_pos = (0.0, 0.0, 0.0)
     target_pos = (1.0, 1.0, 0.0)  # Aim for (1,1,0)
@@ -35,8 +34,6 @@ def test_headless_physics():
         pass
     except Exception as e:
         print(f"Simulation error: {e}")
-
-    pass
 
     final_state = sim.get_current_state()
     print(f"\nFinal State: {final_state}")

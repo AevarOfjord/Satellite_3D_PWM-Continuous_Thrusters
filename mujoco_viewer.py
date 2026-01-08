@@ -3,9 +3,14 @@
 MuJoCo replay viewer with timeline slider for saved simulation data.
 
 Usage:
-  python3 mujoco_viewer.py
-  python3 mujoco_viewer.py Data/Simulation/07-01-2026_14-25-34
-  python3 mujoco_viewer.py -Data/Simulation/07-01-2026_14-25-34
+  Mac:
+  MUJOCO_GL=glfw venv/bin/mjpython mujoco_viewer.py
+  MUJOCO_GL=glfw venv/bin/mjpython mujoco_viewer.py Data/Simulation/07-01-2026_14-25-34
+  
+  Windows:
+  python mujoco_viewer.py
+  python mujoco_viewer.py Data/Simulation/07-01-2026_14-25-34
+  python mujoco_viewer.py -Data/Simulation/07-01-2026_14-25-34
 """
 
 import argparse

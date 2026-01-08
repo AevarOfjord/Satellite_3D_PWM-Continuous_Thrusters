@@ -41,7 +41,6 @@ import sys
 import math
 from pathlib import Path
 from typing import List, Tuple
-from mpl_toolkits.mplot3d import Axes3D
 
 import argparse
 
@@ -495,6 +494,7 @@ def make_offset_path(
         # Buffer-based true offset
         try:
             import importlib
+            import importlib
             import importlib.util
 
             geom_spec = importlib.util.find_spec("shapely.geometry")
@@ -753,6 +753,7 @@ def main():
         ax.plot(bx, by, color="#2ca02c", linewidth=2.5, label="Outline")
         try:
             import importlib
+            import importlib.util
 
             geom_spec = importlib.util.find_spec("shapely.geometry")
             if geom_spec is not None:
@@ -793,6 +794,7 @@ def main():
         )
         try:
             import importlib
+            import importlib.util
 
             geom_spec = importlib.util.find_spec("shapely.geometry")
             if geom_spec is not None:

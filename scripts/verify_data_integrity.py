@@ -78,6 +78,7 @@ def verify_csv(file_path, time_col):
     return True
 
 
+# Default test directory - modify as needed for your test data
 base_dir = "Data/Simulation/02-01-2026_12-13-37"
 
 files_config = [("control_data.csv", "MPC_Start_Time"), ("physics_data.csv", "Time")]

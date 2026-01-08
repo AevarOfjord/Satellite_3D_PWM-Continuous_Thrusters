@@ -6,7 +6,7 @@ Combines logic from previous BaseMPC and PWMMPC into a single, optimized class.
 
 import logging
 import time
-from typing import Any, Dict, Optional, Tuple, Union
+from typing import Any, Dict, List, Optional, Tuple, Union
 
 import numpy as np
 import osqp

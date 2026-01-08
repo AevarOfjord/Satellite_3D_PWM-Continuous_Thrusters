@@ -31,7 +31,6 @@ def run_comparison():
 
     # 2. Continuous Mode
     print("\n2. CONTINUOUS MODE (thruster_type='CON')")
-    print("\n2. CONTINUOUS MODE (thruster_type='CON')")
     con_manager = ThrusterManager(num_thrusters=12, thruster_type="CON")
     # Command 37% thrust on thruster 1
     pattern = np.zeros(12)

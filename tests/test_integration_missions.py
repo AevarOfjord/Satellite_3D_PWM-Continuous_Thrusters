@@ -157,11 +157,11 @@ class TestPointToPointMission:
                 "src.satellite_control.mission.mission_state_manager.SatelliteConfig"
             ) as mock_mission_config,
             patch.object(sim, "draw_simulation", return_value=[]),
-            patch.object(  # mock_draw not used
+            patch.object(
                 sim.mpc_controller, "get_control_action"
             ) as mock_mpc,
             patch.object(sim.mission_manager, "update_target_state", return_value=None),
-        ):  # mock_mission not used
+        ):
             # Configure mocks to disable realistic physics features
             for mock_config in [mock_sim_config, mock_mission_config]:
                 mock_config.USE_REALISTIC_PHYSICS = False
@@ -175,7 +175,6 @@ class TestPointToPointMission:
             )
 
             initial_time = sim.simulation_time
-            # initial_pos = sim.satellite.position.copy()  # Not currently used
 
             # Enable simulation to allow update
             sim.is_running = True
@@ -436,8 +435,6 @@ class TestRealisticPhysics:
                 np.zeros(8),
                 {"status": 2, "status_name": "OPTIMAL", "solve_time": 0.01},
             )
-
-            # initial_vel = sim.satellite.velocity.copy()  # Not currently used
 
             # Run a few steps
             for _ in range(5):

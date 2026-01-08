@@ -13,7 +13,6 @@ def temp_sim_output_dir(tmp_path):
 
 
 @pytest.mark.slow
-@pytest.mark.slow
 def test_simulation_e2e_pwm_mode(temp_sim_output_dir):
     """
     End-to-End test for PWM MPC simulation.

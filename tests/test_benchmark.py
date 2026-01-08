@@ -275,15 +275,11 @@ class TestMPCRegressionDetection:
 
             # Skip reconfiguration and use default controller
             # This avoids hacking internal attributes which are not exposed
-            pass
-
             u, info = mpc_controller.get_control_action(
                 x_current, x_target, x_target_trajectory=trajectory
             )
             elapsed = time.perf_counter() - start
             solve_times.append(elapsed)
-
-            pass
 
         max_time = max(solve_times)
 
@@ -303,8 +299,6 @@ class TestMPCRegressionDetection:
         Marked slow - runs 100 solves and checks memory growth.
         """
         import os
-
-        # import sys  # Unused import removed
         import psutil
 
         x_current = make_state(

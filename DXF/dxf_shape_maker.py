@@ -525,11 +525,7 @@ class DXFShapeMaker:
 
             elif shape["type"] == "spline":
                 points = shape["points"]
-                msp.add_lwpolyline(
-                    points
-                )  # ezdxf handles 3D points if passed, but lwpolyline is technically 2D.
-                # Use add_polyline3d / add_spline for true 3D if needed, but lwpolyline accepts (x,y,z) and ignores Z or writes to elevation?
-                # Actually lwpolyline is 2D. Let's use 3D Polyline for safety.
+                # Use add_polyline3d for true 3D support
                 msp.add_polyline3d(points)
 
             elif shape["type"] == "circle":

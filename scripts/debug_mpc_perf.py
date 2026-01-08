@@ -8,7 +8,6 @@ from scipy.spatial.transform import Rotation
 
 
 def test_mpc_perf():
-    # Setup
     # Setup - use 3D tuples
     start_pos = (1.0, 1.0, 0.0)
     start_euler = (0.0, 0.0, 0.0)
