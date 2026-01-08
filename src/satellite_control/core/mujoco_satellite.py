@@ -117,11 +117,15 @@ class MuJoCoSatelliteSimulator(SimulationBackend):
                 )
             
             # Create AppConfig for internal use
-            from src.satellite_control.config.models import AppConfig, MPCParams
+            # V3.0.0: Use SimulationConfig.create_default() to get proper defaults
+            from src.satellite_control.config.models import AppConfig
+            from src.satellite_control.config.simulation_config import SimulationConfig
+            
+            default_config = SimulationConfig.create_default()
             self._app_config = AppConfig(
                 version="3.0.0",
                 physics=physics,
-                mpc=MPCParams.model_validate({}),  # Use defaults
+                mpc=default_config.app_config.mpc,  # Use defaults from SimulationConfig
                 simulation=simulation,
             )
 
@@ -814,39 +818,80 @@ class MuJoCoSatelliteSimulator(SimulationBackend):
             # Prevent crashing if visual update fails
             pass
 
+    def get_state(self) -> np.ndarray:
+        """
+        Get the full current state of the satellite (SimulationBackend interface).
+        
+        Returns:
+            State vector [x, y, z, qw, qx, qy, qz, vx, vy, vz, wx, wy, wz] (13 elements)
+        """
+        pos = self.position
+        quat = self.quaternion
+        vel = self.velocity
+        ang_vel = self.angular_velocity
+        return np.concatenate([pos, quat, vel, ang_vel])
+
     def set_state(
         self,
-        position: np.ndarray,
-        velocity: np.ndarray,
+        state: Optional[np.ndarray] = None,
+        position: Optional[np.ndarray] = None,
+        velocity: Optional[np.ndarray] = None,
         quaternion: Optional[np.ndarray] = None,
         angular_velocity: Optional[np.ndarray] = None,
         angle: Optional[Tuple[float, float, float]] = None,
     ):
-        """Set satellite state directly."""
+        """
+        Set satellite state (SimulationBackend interface with legacy compatibility).
+        
+        Supports two calling conventions:
+        1. set_state(state) - where state is [x, y, z, qw, qx, qy, qz, vx, vy, vz, wx, wy, wz] (13 elements)
+           This matches the SimulationBackend interface.
+        2. set_state(position=..., velocity=..., quaternion=..., ...) - legacy interface
+        
+        Args:
+            state: Full state vector [13 elements] (SimulationBackend interface)
+            position: Position [x, y, z] (legacy interface)
+            velocity: Velocity [vx, vy, vz] (legacy interface)
+            quaternion: Quaternion [qw, qx, qy, qz] (legacy interface)
+            angular_velocity: Angular velocity [wx, wy, wz] (legacy interface)
+            angle: Euler angles [roll, pitch, yaw] (legacy interface)
+        """
+        # If state vector provided as positional argument (SimulationBackend interface)
+        # Check if state is provided and no keyword arguments are used
+        if state is not None and position is None and velocity is None and quaternion is None and angular_velocity is None and angle is None:
+            if len(state) != 13:
+                raise ValueError(f"State vector must be 13 elements, got {len(state)}")
+            position = state[0:3]
+            quaternion = state[3:7]
+            velocity = state[7:10]
+            angular_velocity = state[10:13]
+        
         # Set position (3D)
-        if len(position) < 3:
-            # Pad
-            pos3 = np.zeros(3)
-            pos3[: len(position)] = position
-            position = pos3
-
-        self.data.qpos[0:3] = position
+        if position is not None:
+            if len(position) < 3:
+                # Pad
+                pos3 = np.zeros(3)
+                pos3[: len(position)] = position
+                position = pos3
+            self.data.qpos[0:3] = position
 
         # Set quaternion (Orientation)
         if quaternion is not None:
             self.data.qpos[3:7] = quaternion
         elif angle is not None:
             self.data.qpos[3:7] = euler_xyz_to_quat_wxyz(angle)
-        else:
-            # Identity
-            self.data.qpos[3:7] = [1, 0, 0, 0]
+        elif state is not None and position is not None:
+            # If state was provided, quaternion was already extracted above
+            pass
+        # If neither quaternion nor angle provided, leave existing quaternion
 
         # Set velocity
-        if len(velocity) < 3:
-            vel3 = np.zeros(3)
-            vel3[: len(velocity)] = velocity
-            velocity = vel3
-        self.data.qvel[0:3] = velocity
+        if velocity is not None:
+            if len(velocity) < 3:
+                vel3 = np.zeros(3)
+                vel3[: len(velocity)] = velocity
+                velocity = vel3
+            self.data.qvel[0:3] = velocity
 
         # Ang Vel
         if angular_velocity is not None:
