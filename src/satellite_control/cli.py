@@ -160,8 +160,6 @@ def config(
     """
     Inspect or validate configuration.
     """
-    # AppConfig imported only if needed for type checking but was unused
-
     try:
         app_config = SatelliteConfig.get_app_config()
 
@@ -169,7 +167,6 @@ def config(
             console.print_json(app_config.model_dump_json())
         else:
             console.print("[bold green]Configuration is valid.[/bold green]")
-            # console.print(f"MPC Type: {app_config.mpc.mpc_type}")
             mode_str = "Realistic" if app_config.physics.use_realistic_physics else "Idealized"
             console.print(f"Physics Mode: {mode_str}")
 

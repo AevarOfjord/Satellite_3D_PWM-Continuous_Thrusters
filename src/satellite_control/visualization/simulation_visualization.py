@@ -585,10 +585,6 @@ class SimulationVisualizationManager:
         if not self.state_history:
             return
 
-        # Save mission summary to file (no terminal output)
-        # self.save_mission_summary()  # DEPRECATED: Handled by
-        # MissionReportGenerator in simulation.py
-
         # Print brief success message
         final_state = self.get_current_state()
         if self.target_state is not None:

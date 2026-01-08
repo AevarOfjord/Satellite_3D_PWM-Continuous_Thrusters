@@ -31,7 +31,6 @@ from cycler import cycler
 from matplotlib.axes import Axes
 from matplotlib.figure import Figure
 from matplotlib.patches import Circle
-from mpl_toolkits.mplot3d import Axes3D
 from mpl_toolkits.mplot3d.art3d import Poly3DCollection
 
 from src.satellite_control.config import SatelliteConfig
@@ -2776,13 +2775,6 @@ class LinearizedVisualizationGenerator(UnifiedVisualizationGenerator):
 
     def __init__(self, data_directory: str = "Data/Simulation"):
         super().__init__(data_directory)
-
-
-class RealLinearizedVisualizationGenerator(UnifiedVisualizationGenerator):
-    """Simulation-only build stub for legacy real test visualization."""
-
-    def __init__(self, data_directory: str = "Data/Real_Test", interactive: bool = False):
-        raise RuntimeError("Simulation-only build: real-data visualization has been removed.")
 
 
 def get_demo_shape(shape_type: str) -> List[tuple]:

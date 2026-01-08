@@ -69,7 +69,6 @@ class MissionStateManager:
             normalize_angle_func: Function to normalize angles to [-pi, pi]
             angle_difference_func: Function to calculate angle difference
             point_to_line_distance_func: Point-to-line distance function
-            point_to_line_distance_func: Point-to-line distance function
         """
         self.position_tolerance = position_tolerance
         self.angle_tolerance = angle_tolerance

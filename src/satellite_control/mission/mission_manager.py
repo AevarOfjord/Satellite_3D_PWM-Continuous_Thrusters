@@ -357,8 +357,6 @@ class MissionManager:
         print(f"   Units: {units_name} (INSUNITS={insunits}), " f"scaled → meters (x{to_m})")
         return boundary_m
 
-    # Legacy implementation removed (delegated to MissionLogic/MissionCLI)
-
 
 # Helper functions for external use
 def get_path_tangent_orientation(
@@ -387,8 +385,6 @@ def get_path_tangent_orientation(
 
         if current_dist + segment_len >= distance:
             # Found segment
-            # t represents progress along segment (unused)
-            _ = (distance - current_dist) / max(float(segment_len), 1e-6)
             direction = p2 - p1
             angle = np.arctan2(direction[1], direction[0])
             return float(angle)

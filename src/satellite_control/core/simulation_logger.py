@@ -10,7 +10,6 @@ from typing import Any, Dict, Optional
 
 import numpy as np
 
-# from src.satellite_control.config import SatelliteConfig  # Unused import removed
 from src.satellite_control.utils.data_logger import DataLogger
 
 logger = logging.getLogger(__name__)

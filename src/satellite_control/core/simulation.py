@@ -33,7 +33,6 @@ Configuration:
 - Consistent with real hardware configuration
 """
 
-# from datetime import datetime # Removed unused
 import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
@@ -49,7 +48,6 @@ from src.satellite_control.config import (
     use_structured_config,
 )
 
-# from src.satellite_control.core.data_logger import DataLoggerSimulationIO # Removed unused
 from src.satellite_control.config.constants import Constants
 from src.satellite_control.config.satellite_config import (
     initialize_config,
@@ -67,9 +65,6 @@ from src.satellite_control.mission.mission_state_manager import (
 from src.satellite_control.utils.data_logger import create_data_logger
 from src.satellite_control.utils.logging_config import setup_logging
 
-# from src.satellite_control.control.mpc_factory import (
-#     SatelliteMPC as SatelliteMPCLinearized,
-# ) # Removed
 from src.satellite_control.utils.navigation_utils import (
     angle_difference,
     normalize_angle,
@@ -224,11 +219,6 @@ class SatelliteMPCLinearizedSimulation:
             f"Target ({target_pos[0]:.2f}, {target_pos[1]:.2f}, 0.00)"
         )
 
-        # satellite_params = SatelliteConfig.get_app_config().physics # Removed
-        # mpc_params = SatelliteConfig.get_app_config().mpc # Removed
-
-        # self.mpc_controller = SatelliteMPCLinearized(satellite_params, mpc_params) # Removed
-
         # Simulation state
         self.is_running = False
         self.simulation_time = 0.0
@@ -337,7 +327,6 @@ class SatelliteMPCLinearizedSimulation:
         # Initialize IO helper for data export operations
         self._io = SimulationIO(self)
 
-        # self.animation_frames = [] # Removed for memory optimization
 
         # Initialize Simulation Context for logging
         from src.satellite_control.core.simulation_context import SimulationContext

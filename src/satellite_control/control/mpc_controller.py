@@ -6,7 +6,7 @@ Combines logic from previous BaseMPC and PWMMPC into a single, optimized class.
 
 import logging
 import time
-from typing import Any, Dict, List, Optional, Tuple, Union
+from typing import Any, Dict, Optional, Tuple, Union
 
 import numpy as np
 import osqp
@@ -69,7 +69,6 @@ class MPCController:
 
         # MPC parameters
         self.N = get_param(mpc_params, "prediction_horizon", "prediction_horizon")
-        self.M = get_param(mpc_params, "control_horizon", "control_horizon")
         self.dt = get_param(mpc_params, "dt", "dt")
 
         self.solver_time_limit = get_param(mpc_params, "solver_time_limit", "solver_time_limit")
@@ -95,10 +94,6 @@ class MPCController:
 
         # Performance tracking
         self.solve_times: list[float] = []
-
-        # Linearization cache (hashed by rounded quaternion?)
-        # For 3D quaternion, caching is harder. We might skip caching or hash coarse (qw, qz).
-        self._linearization_cache: Dict[int, Tuple[np.ndarray, np.ndarray]] = {}
 
         # Precompute thruster forces (body frame)
         self._precompute_thruster_forces()
@@ -466,6 +461,3 @@ class MPCController:
         u = np.zeros(12)
         # Placeholder: Zero thrust
         return u
-
-    def prepare_targets(self, x, xt, xtt):
-        return x, xtt, xt

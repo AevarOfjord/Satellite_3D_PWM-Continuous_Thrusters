@@ -210,8 +210,6 @@ class SatelliteConfig:
     # PHYSICAL PARAMETERS
     # ========================================================================
 
-    # AIR_BEARING parameters removed as per config cleanup
-
     TOTAL_MASS = physics.TOTAL_MASS
     SATELLITE_SIZE = physics.SATELLITE_SIZE
     MOMENT_OF_INERTIA = physics.MOMENT_OF_INERTIA
