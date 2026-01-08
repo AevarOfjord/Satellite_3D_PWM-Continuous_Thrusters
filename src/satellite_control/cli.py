@@ -605,52 +605,49 @@ def install_mission(
     console.print(f"\nUse 'satellite-control list-missions' to see all available plugins.")
 
 
-@app.command("dashboard")
-def dashboard(
-    port: int = typer.Option(8501, "--port", "-p", help="Port to run dashboard on"),
-    host: str = typer.Option("localhost", "--host", help="Host to bind to"),
-):
+@app.command("studio")
+def studio():
     """
-    Launch the Streamlit web dashboard.
+    Launch interactive studio mode.
     
-    Opens a web-based interface for monitoring and analyzing simulation data.
+    Opens an interactive menu system for running simulations, analyzing results,
+    configuring satellites, and viewing visualizations - all in Python, no web server.
     """
-    from pathlib import Path
-    import subprocess
-    import sys
-    
-    dashboard_path = Path(__file__).parent / "visualization" / "dashboard.py"
-    
-    if not dashboard_path.exists():
-        console.print(f"[red]Error: Dashboard file not found: {dashboard_path}[/red]")
-        raise typer.Exit(1)
-    
-    console.print(f"[bold blue]Launching Satellite Control Dashboard...[/bold blue]")
-    console.print(f"  URL: http://{host}:{port}")
-    console.print(f"  Press Ctrl+C to stop")
+    from src.satellite_control.studio import run_studio
     
     try:
-        subprocess.run(
-            [
-                sys.executable,
-                "-m",
-                "streamlit",
-                "run",
-                str(dashboard_path),
-                "--server.port",
-                str(port),
-                "--server.address",
-                host,
-            ],
-            check=True,
-        )
+        run_studio()
     except KeyboardInterrupt:
-        console.print("\n[yellow]Dashboard stopped.[/yellow]")
-    except subprocess.CalledProcessError as e:
-        console.print(f"[red]Error launching dashboard: {e}[/red]")
+        console.print("\n[yellow]Studio mode exited.[/yellow]")
+    except Exception as e:
+        console.print(f"[red]Error in studio mode: {e}[/red]")
         raise typer.Exit(1)
-    except FileNotFoundError:
-        console.print("[red]Error: Streamlit not found. Install with: pip install streamlit[/red]")
+
+
+@app.command("visualize")
+def visualize(
+    data_path: str = typer.Argument(..., help="Path to simulation data directory"),
+    interactive: bool = typer.Option(True, "--interactive/--static", help="Open interactive plots (default) or generate static images"),
+):
+    """
+    Visualize simulation results using Python-native matplotlib.
+    
+    Opens interactive matplotlib windows for trajectory, telemetry, and performance analysis.
+    No web server required - everything runs in Python.
+    """
+    from pathlib import Path
+    from src.satellite_control.visualize import visualize_simulation_data
+    
+    data_dir = Path(data_path).expanduser().resolve()
+    
+    if not data_dir.exists():
+        console.print(f"[red]Error: Data directory not found: {data_dir}[/red]")
+        raise typer.Exit(1)
+    
+    try:
+        visualize_simulation_data(data_dir, interactive=interactive)
+    except Exception as e:
+        console.print(f"[red]Error visualizing data: {e}[/red]")
         raise typer.Exit(1)
 
 

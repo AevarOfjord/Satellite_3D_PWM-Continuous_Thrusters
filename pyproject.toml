@@ -1,11 +1,12 @@
 # PyProject configuration for Satellite Thruster Control System
 
 [build-system]
-requires = ["setuptools>=45", "wheel", "setuptools_scm>=6.2"]
+requires = ["setuptools>=45", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "satellite-thruster-control"
+version = "4.0.0"
 description = "Model Predictive Control system for satellite thruster control"
 readme = "README.md"
 requires-python = ">=3.9"
