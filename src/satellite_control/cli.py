@@ -22,6 +22,8 @@ from src.satellite_control.config.presets import (
 )
 from src.satellite_control.core.simulation import SatelliteMPCLinearizedSimulation
 from src.satellite_control.mission.mission_manager import MissionManager
+from src.satellite_control.mission.plugin import get_registry, discover_plugins
+from src.satellite_control.mission.plugins import *  # Auto-register built-in plugins
 
 app = typer.Typer(
     help="Satellite Control System - MPC Simulation and Verification CLI",
@@ -341,17 +343,6 @@ def bench(
         raise typer.Exit(code=ret_code)
 
 
-@app.command("list-missions")
-def list_missions():
-    """
-    List available mission types.
-    """
-    console.print("[bold]Available missions:[/bold]")
-    console.print("  - waypoint")
-    console.print("  - shape_following")
-    console.print("[dim]Use: satellite-control interactive[/dim]")
-
-
 @app.command()
 def presets(
     list_all: bool = typer.Option(False, "--list", "-l", help="List all available presets"),
@@ -532,6 +523,86 @@ def config(
     except Exception as e:
         console.print(f"[bold red]Unexpected Error:[/bold red] {e}")
         raise typer.Exit(code=1)
+
+
+@app.command("list-missions")
+def list_missions(
+    verbose: bool = typer.Option(False, "--verbose", "-v", help="Show detailed plugin information"),
+):
+    """
+    List all available mission plugins.
+    
+    Shows built-in and discovered mission plugins with their descriptions.
+    """
+    # Discover plugins from search paths
+    registry = get_registry()
+    discovered_count = discover_plugins()
+    
+    console.print(Panel.fit("Available Mission Plugins", style="bold blue"))
+    
+    plugins = registry.list_plugins()
+    if not plugins:
+        console.print("[yellow]No mission plugins found.[/yellow]")
+        return
+    
+    console.print(f"\nFound {len(plugins)} mission plugin(s):\n")
+    
+    for name in plugins:
+        info = registry.get_plugin_info(name)
+        if info is None:
+            continue
+        
+        console.print(f"[bold cyan]{info['display_name']}[/bold cyan] ({name})")
+        console.print(f"  Version: {info['version']}")
+        if info['author']:
+            console.print(f"  Author: {info['author']}")
+        console.print(f"  Description: {info['description']}")
+        
+        if verbose:
+            console.print(f"  File: {info['file_path']}")
+            if info['required_parameters']:
+                console.print(f"  Required parameters: {', '.join(info['required_parameters'])}")
+        
+        console.print()
+
+
+@app.command("install-mission")
+def install_mission(
+    plugin_path: str = typer.Argument(..., help="Path to Python file containing mission plugin"),
+):
+    """
+    Install a custom mission plugin from a file.
+    
+    The plugin file must contain a class that inherits from MissionPlugin.
+    """
+    from pathlib import Path
+    
+    file_path = Path(plugin_path).expanduser().resolve()
+    
+    if not file_path.exists():
+        console.print(f"[red]Error: File not found: {file_path}[/red]")
+        raise typer.Exit(1)
+    
+    if not file_path.is_file():
+        console.print(f"[red]Error: Not a file: {file_path}[/red]")
+        raise typer.Exit(1)
+    
+    if not file_path.suffix == ".py":
+        console.print(f"[red]Error: File must be a Python file (.py): {file_path}[/red]")
+        raise typer.Exit(1)
+    
+    registry = get_registry()
+    plugin = registry.load_plugin_from_file(file_path)
+    
+    if plugin is None:
+        console.print(f"[red]Error: Failed to load plugin from {file_path}[/red]")
+        console.print("[yellow]Make sure the file contains a class inheriting from MissionPlugin[/yellow]")
+        raise typer.Exit(1)
+    
+    console.print(f"[green]✓ Successfully installed plugin: {plugin.get_display_name()}[/green]")
+    console.print(f"  Name: {plugin.get_name()}")
+    console.print(f"  Version: {plugin.get_version()}")
+    console.print(f"\nUse 'satellite-control list-missions' to see all available plugins.")
 
 
 if __name__ == "__main__":

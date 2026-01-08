@@ -25,25 +25,45 @@ class MissionCLI:
         self.system_title = "Satellite Control Simulation"
 
     def show_mission_menu(self) -> str:
-        """Show main mission selection menu."""
+        """Show main mission selection menu.
+        
+        V4.0.0: Phase 2 - Now uses plugin system to discover available missions.
+        """
+        from src.satellite_control.mission.plugin import get_registry
+        # Import plugins module to trigger auto-registration
+        import src.satellite_control.mission.plugins  # noqa: F401
+        
+        registry = get_registry()
+        plugins = registry.list_plugins()
+        
         print(f"\n{'=' * 50}")
         print(f"  {self.system_title.upper()}")
         print(f"{'=' * 50}")
         print("Select Mission Mode:")
-        print("1. Waypoint Navigation (Point-to-Point)")
-        print("2. Shape Following (Circle, Square, DXF profile)")
+        
+        # Build menu from plugins
+        plugin_map = {}
+        for idx, plugin_name in enumerate(plugins, start=1):
+            plugin = registry.get_plugin(plugin_name)
+            if plugin:
+                display_name = plugin.get_display_name()
+                print(f"{idx}. {display_name}")
+                plugin_map[str(idx)] = plugin_name
+                plugin_map[plugin_name] = plugin_name
+        
         print("q. Quit")
 
         while True:
-            choice = input("\nEnter choice (1-2 or q): ").strip().lower()
+            max_choice = len(plugins)
+            choice = input(f"\nEnter choice (1-{max_choice} or q): ").strip().lower()
 
-            if choice == "1":
-                return "waypoint"
-            elif choice == "2":
-                return "shape_following"
-            elif choice == "q":
+            if choice == "q":
                 print("Exiting.")
                 sys.exit(0)
+            elif choice in plugin_map:
+                return plugin_map[choice]
+            elif choice.isdigit() and 1 <= int(choice) <= max_choice:
+                return plugin_map[choice]
             else:
                 print("Invalid choice. Please try again.")
 

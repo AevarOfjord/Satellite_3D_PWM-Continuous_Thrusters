@@ -53,7 +53,30 @@ class MissionManager:
         return self.cli.show_mission_menu()
 
     def run_selected_mission(self, mode_choice: str) -> Optional[Dict[str, Any]]:
-        """Run the selected mission type."""
+        """Run the selected mission type.
+        
+        V4.0.0: Phase 2 - Now uses plugin system to run missions.
+        Falls back to legacy hardcoded missions for backward compatibility.
+        """
+        from src.satellite_control.mission.plugin import get_registry
+        from src.satellite_control.config.simulation_config import SimulationConfig
+        
+        registry = get_registry()
+        plugin = registry.get_plugin(mode_choice)
+        
+        if plugin:
+            # Use plugin system
+            config = SimulationConfig.create_default()
+            mission_state = plugin.configure(config)
+            config.mission_state = mission_state
+            
+            return {
+                "simulation_config": config,
+                "mission_type": mode_choice,
+                "plugin_name": plugin.get_display_name(),
+            }
+        
+        # Fallback to legacy hardcoded missions for backward compatibility
         if mode_choice == "waypoint":
             # Delegate entirely to CLI which has full implementation
             # V3.0.0: Always request simulation_config
