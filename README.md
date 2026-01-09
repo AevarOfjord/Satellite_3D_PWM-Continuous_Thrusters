@@ -1,124 +1,100 @@
-# Real-Time Satellite MPC Control with MuJoCo
+# Orbital Inspector Satellite Control System
 
 [![Python 3.9-3.12](https://img.shields.io/badge/python-3.9--3.12-blue.svg)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Optimization: OSQP](https://img.shields.io/badge/Optimization-OSQP-green.svg)](https://osqp.org/)
 [![Physics: MuJoCo](https://img.shields.io/badge/Physics-MuJoCo-orange.svg)](https://mujoco.org/)
 
-**A high-fidelity 2D planar control system demonstrating real-time Model Predictive Control (MPC) of a satellite with 8 thrusters on an air-bearing platform.**
-
-This project showcases advanced control engineering capabilities, including convex optimization, state-space modeling, and physics-based simulation architecture.
+**A 6-DOF orbital inspection satellite simulation with Model Predictive Control, reaction wheels, and multi-satellite coordination.**
 
 ---
 
-## 🚀 Engineering Highlights
+## 🚀 Features
 
-This is a personal portfolio project demonstrating expertise in:
-
-- **Real-Time Optimization**: Implementation of a custom MPC controller using **OSQP** (Operator Splitting Quadratic Program), achieving **<5ms solve times** suitable for 20Hz+ control loops.
-- **Physics Simulation**: Integration with **MuJoCo** for industry-standard rigid body dynamics, modeling friction, collisions, and thruster actuation.
-- **Control Architecture**: Robust state machine handling waypoint navigation, trajectory generation, and obstacle avoidance.
-- **Modern Python Stack**: Type-hinted codebase, automated testing, and modular design patterns.
+| Feature                    | Description                                            |
+| -------------------------- | ------------------------------------------------------ |
+| **Reaction Wheel Control** | 3-axis attitude control with 0.18° precision           |
+| **Orbital Dynamics**       | Hill-Clohessy-Wiltshire gravity gradient model         |
+| **Multi-Satellite Fleet**  | 3 inspectors with collision avoidance                  |
+| **Mission Designer UI**    | Three.js web interface for trajectory planning         |
+| **Mission System**         | Pre-built flyby, circumnavigation, inspection missions |
 
 ## 🛠️ Technology Stack
 
-| Component    | Technology | Description                                                    |
-| :----------- | :--------- | :------------------------------------------------------------- |
-| **Solver**   | **OSQP**   | Fast, robust convex QP solver replacing legacy MIP approaches. |
-| **Physics**  | **MuJoCo** | High-performance physics engine for realistic dynamics.        |
-| **Language** | **Python** | Core logic, with `numpy` vectorization for performance.        |
-| **Testing**  | **Pytest** | Comprehensive unit and integration test suite.                 |
+| Component   | Technology                         |
+| ----------- | ---------------------------------- |
+| **Solver**  | OSQP (<5ms solve times)            |
+| **Physics** | MuJoCo 3.x                         |
+| **Control** | 16-state MPC with 9 control inputs |
+| **UI**      | Three.js 3D visualization          |
 
-## 🏗️ Architecture
+## 📁 Project Structure
 
-The system operates a closed-loop control cycle:
-
-```mermaid
-graph LR
-    A[Mission Planner] -->|Target State| B[MPC Controller]
-    B -->|Solve QP| C(Optimal Control u*)
-    C -->|PWM Command| D[MuJoCo Physics]
-    D -->|State Feedback| B
-    style B fill:#d4f1f4,stroke:#0077b6,stroke-width:2px
-    style D fill:#ffe8d6,stroke:#ff9f1c,stroke-width:2px
 ```
-
-See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for detailed system design.
+├── models/
+│   ├── satellite_rw.xml        # Single inspector + target
+│   └── satellite_fleet.xml     # Multi-inspector fleet
+├── src/satellite_control/
+│   ├── control/                # MPC controllers
+│   ├── config/                 # Orbital & actuator configs
+│   ├── fleet/                  # Multi-satellite coordination
+│   ├── mission/                # Mission types & executor
+│   └── physics/                # Orbital dynamics (CW equations)
+├── missions/                   # Sample mission JSON files
+├── ui/                         # Web-based mission designer
+└── scripts/                    # Test scripts
+```
 
 ## ⚡ Quick Start
 
-### Prerequisites
-
-- Python 3.9 - 3.12 (Python 3.13 not yet supported by dependencies)
-
-### Installation
-
 ```bash
-# Clone and install dependencies
-git clone https://github.com/AevarOfjord/mpc-air-bearing-satellite.git
-cd mpc-air-bearing-satellite
+# Install dependencies
 pip install -r requirements.txt
+
+# Run all tests
+python3 scripts/run_all_tests.py
+
+# Launch mission designer UI
+cd ui && python3 -m http.server 8080
+# Open http://localhost:8080
 ```
 
-### Running the Simulation
+## 🧪 Tests
 
-```bash
-python3 run_simulation.py
+| Test               | Command                              |
+| ------------------ | ------------------------------------ |
+| All tests          | `python3 scripts/run_all_tests.py`   |
+| Reaction wheels    | `python3 scripts/test_rw_control.py` |
+| Orbital dynamics   | `python3 scripts/test_orbital.py`    |
+| Fleet coordination | `python3 scripts/test_fleet.py`      |
+| Mission system     | `python3 scripts/test_mission.py`    |
+
+## 📊 Performance
+
+| Metric                | Value  |
+| --------------------- | ------ |
+| Position control      | ±0.5mm |
+| Attitude control      | ±0.18° |
+| MPC solve time        | <1ms   |
+| Station-keeping error | 0.00cm |
+| Formation separation  | 8.66m  |
+
+## 📋 Mission Types
+
+```python
+from src.satellite_control.mission import (
+    create_flyby_mission,
+    create_circumnavigation_mission,
+    create_station_keeping_mission,
+    create_inspection_mission,
+)
+
+# Create and execute
+mission = create_flyby_mission()
+executor = MissionExecutor()
+result = executor.execute(mission)
 ```
 
-Follow the interactive prompts to select missions (e.g., Waypoint Navigation, Shape Following).
+## 📄 License
 
-### Visualization
-
-The simulation automatically generates MP4 animations and telemetry plots in the `Data/` directory.
-
----
-
-## 📂 Project Structure
-
-- `src/satellite_control`: Core source code.
-  - `control/`: MPC implementation (`mpc_controller.py`).
-  - `core/`: Simulation loop and physics interface.
-  - `config/`: Physics and control parameters.
-- `tests/`: Comprehensive test suite.
-- `docs/`: Technical documentation.
-
-## 📚 Documentation
-
-Comprehensive documentation is available in the `docs/` directory:
-
-### Getting Started
-
-- **[QUICKSTART.md](docs/QUICKSTART.md)** - 5-minute guide to your first simulation
-- **[FAQ.md](docs/FAQ.md)** - Common questions and troubleshooting
-
-### Core Documentation
-
-- **[ARCHITECTURE.md](docs/ARCHITECTURE.md)** - System design and component overview
-- **[SIMULATION.md](docs/SIMULATION.md)** - Mission types, loop architecture, and timing
-- **[MATHEMATICS.md](docs/MATHEMATICS.md)** - MPC formulation and control theory
-
-### Development & Testing
-
-- **[DEVELOPMENT_GUIDE.md](docs/DEVELOPMENT_GUIDE.md)** - Contributing and development workflows
-- **[TESTING.md](docs/TESTING.md)** - Running tests and simulation validation
-
-### Reference
-
-- **[PHYSICS_ENGINE.md](docs/PHYSICS_ENGINE.md)** - MuJoCo integration details
-- **[VISUALIZATION.md](docs/VISUALIZATION.md)** - Understanding output and CSV format
-- **[TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md)** - Common issues and solutions
-- **[CHANGELOG.md](docs/CHANGELOG.md)** - Project version history
-
-## 👨‍💻 About
-
-**Aevar A. Oefjoerd**  
-_Robot Control & Automation Engineer_
-
-This project serves as a reference implementation for my skills in **GNC (Guidance, Navigation, and Control)**, **Optimization**, and **Software Engineering**.
-
-[GitHub Profile](https://github.com/AevarOfjord)
-
----
-
-_Note: This repository is a professional portfolio project demonstrating advanced control engineering capabilities._
+MIT License - See [LICENSE](LICENSE)

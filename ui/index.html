@@ -1,0 +1,120 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Orbital Inspector - Mission Designer</title>
+    <link rel="stylesheet" href="style.css" />
+  </head>
+  <body>
+    <div class="app-container">
+      <!-- Header -->
+      <header class="header">
+        <div class="logo">
+          <span class="logo-icon">🛰️</span>
+          <h1>Orbital Inspector</h1>
+        </div>
+        <div class="header-actions">
+          <button class="btn btn-secondary" id="loadBtn">Load Mission</button>
+          <button class="btn btn-secondary" id="exportBtn">Export</button>
+          <button class="btn btn-primary" id="runBtn">▶ Run Simulation</button>
+        </div>
+      </header>
+
+      <!-- Main Content -->
+      <main class="main-content">
+        <!-- Sidebar: Waypoint Panel -->
+        <aside class="sidebar">
+          <div class="panel">
+            <div class="panel-header">
+              <h2>Waypoints</h2>
+              <button class="btn btn-sm btn-accent" id="addWaypointBtn">
+                + Add
+              </button>
+            </div>
+            <div class="waypoint-list" id="waypointList">
+              <div class="empty-state">
+                <p>No waypoints yet</p>
+                <p class="hint">Click in the 3D view or use + Add</p>
+              </div>
+            </div>
+          </div>
+
+          <div class="panel">
+            <div class="panel-header">
+              <h2>Inspector</h2>
+            </div>
+            <div class="inspector-controls">
+              <label>
+                <span>Start Position</span>
+                <div class="input-group">
+                  <input type="number" id="startX" value="5" step="0.5" />
+                  <input type="number" id="startY" value="0" step="0.5" />
+                  <input type="number" id="startZ" value="0" step="0.5" />
+                </div>
+              </label>
+              <label>
+                <span>Approach Speed</span>
+                <input
+                  type="range"
+                  id="approachSpeed"
+                  min="0.01"
+                  max="0.2"
+                  step="0.01"
+                  value="0.05"
+                />
+                <span class="value-display" id="speedDisplay">0.05 m/s</span>
+              </label>
+            </div>
+          </div>
+
+          <div class="panel">
+            <div class="panel-header">
+              <h2>Status</h2>
+            </div>
+            <div class="status-panel" id="statusPanel">
+              <div class="status-item">
+                <span class="status-label">Connection</span>
+                <span class="status-value" id="connectionStatus"
+                  >⚪ Offline</span
+                >
+              </div>
+              <div class="status-item">
+                <span class="status-label">Simulation</span>
+                <span class="status-value" id="simStatus">Ready</span>
+              </div>
+            </div>
+          </div>
+        </aside>
+
+        <!-- 3D Visualization -->
+        <div class="visualization" id="visualization">
+          <canvas id="canvas3d"></canvas>
+          <div class="viz-controls">
+            <button class="viz-btn" id="resetViewBtn" title="Reset View">
+              🔄
+            </button>
+            <button class="viz-btn" id="topViewBtn" title="Top View">⬆️</button>
+            <button class="viz-btn" id="sideViewBtn" title="Side View">
+              ➡️
+            </button>
+          </div>
+          <div class="viz-info">
+            <span id="hoverInfo"></span>
+          </div>
+        </div>
+      </main>
+
+      <!-- Footer -->
+      <footer class="footer">
+        <span>Orbital Inspector Mission Designer v1.0</span>
+        <span id="coordDisplay">X: 0.00 Y: 0.00 Z: 0.00</span>
+      </footer>
+    </div>
+
+    <!-- Three.js from CDN -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+    <script src="app.js"></script>
+  </body>
+</html>

@@ -1,0 +1,52 @@
+{
+  "name": "Quick Flyby Demo",
+  "mission_type": "flyby",
+  "description": "Quick flyby inspection - approaches target, passes by, returns to safe distance",
+  "start_position": [6.0, 0.0, 0.0],
+  "keep_out_radius": 2.0,
+  "max_speed": 0.15,
+  "phases": [
+    {
+      "name": "Approach",
+      "description": "Approach target from starting position",
+      "waypoints": [
+        {
+          "position": [4.5, 0.0, 0.0],
+          "hold_time": 2.0,
+          "approach_speed": 0.1,
+          "name": "Approach point"
+        }
+      ]
+    },
+    {
+      "name": "Flyby",
+      "description": "Pass by target at close range",
+      "waypoints": [
+        {
+          "position": [3.5, 2.0, 0.0],
+          "hold_time": 3.0,
+          "approach_speed": 0.05,
+          "name": "Flyby port side"
+        },
+        {
+          "position": [3.5, -2.0, 0.0],
+          "hold_time": 3.0,
+          "approach_speed": 0.05,
+          "name": "Flyby starboard side"
+        }
+      ]
+    },
+    {
+      "name": "Departure",
+      "description": "Return to safe standoff distance",
+      "waypoints": [
+        {
+          "position": [6.0, 0.0, 0.0],
+          "hold_time": 0.0,
+          "approach_speed": 0.1,
+          "name": "Safe distance"
+        }
+      ]
+    }
+  ]
+}

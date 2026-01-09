@@ -1,0 +1,25 @@
+{
+  "name": "Full Circumnavigation",
+  "mission_type": "circumnavigation",
+  "description": "Complete 360° orbit around target with 8 inspection stops",
+  "start_position": [5.0, 0.0, 0.0],
+  "keep_out_radius": 2.0,
+  "max_speed": 0.08,
+  "phases": [
+    {
+      "name": "Circumnavigation",
+      "description": "Circular orbit with inspection holds",
+      "waypoints": [
+        {"position": [5.0, 0.0, 0.0], "hold_time": 5.0, "approach_speed": 0.05, "name": "0° (Start)"},
+        {"position": [3.54, 3.54, 0.0], "hold_time": 5.0, "approach_speed": 0.05, "name": "45°"},
+        {"position": [0.0, 5.0, 0.0], "hold_time": 5.0, "approach_speed": 0.05, "name": "90°"},
+        {"position": [-3.54, 3.54, 0.0], "hold_time": 5.0, "approach_speed": 0.05, "name": "135°"},
+        {"position": [-5.0, 0.0, 0.0], "hold_time": 5.0, "approach_speed": 0.05, "name": "180°"},
+        {"position": [-3.54, -3.54, 0.0], "hold_time": 5.0, "approach_speed": 0.05, "name": "225°"},
+        {"position": [0.0, -5.0, 0.0], "hold_time": 5.0, "approach_speed": 0.05, "name": "270°"},
+        {"position": [3.54, -3.54, 0.0], "hold_time": 5.0, "approach_speed": 0.05, "name": "315°"},
+        {"position": [5.0, 0.0, 0.0], "hold_time": 0.0, "approach_speed": 0.05, "name": "360° (Return)"}
+      ]
+    }
+  ]
+}
