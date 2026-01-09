@@ -201,7 +201,15 @@ class MissionExecutor:
                 net_force = np.zeros(3)
                 for i in range(6):
                     net_force += u[3 + i] * self.controller.max_thrust * thrust_dirs[i]
-                self.data.xfrc_applied[sat_body_id, 0:3] = net_force
+
+                # Add CW orbital forces
+                from src.satellite_control.config.orbital_config import OrbitalConfig
+                from src.satellite_control.physics.orbital_dynamics import compute_cw_force
+
+                orbital_config = OrbitalConfig()
+                cw_force = compute_cw_force(pos, vel, 10.0, orbital_config)
+
+                self.data.xfrc_applied[sat_body_id, 0:3] = net_force + cw_force
 
                 # Check waypoint reached
                 error = np.linalg.norm(pos - current_target.position)
